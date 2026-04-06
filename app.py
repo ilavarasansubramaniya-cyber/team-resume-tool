@@ -14,7 +14,7 @@ if not API_KEY:
 
 if API_KEY:
     genai.configure(api_key=API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
     st.title("📄 Team Resume Reformatter")
     st.info("Upload a raw PDF resume to convert it into our official team template.")
