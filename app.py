@@ -11,11 +11,9 @@ import os
 st.set_page_config(page_title="Executive Resume Builder", layout="wide")
 
 # --- AI Configuration ---
-# Ensure GEMINI_API_KEY is added to your Streamlit Secrets
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-1.5-flash')
 
-# --- Sidebar Controls ---
+# Sidebar for company and contact info
 st.sidebar.title("🏢 Branding & ID")
 company_choice = st.sidebar.selectbox("Select Sister Company", ["W3G", "Synectics", "ProTouch"])
 contact_number = st.sidebar.text_input("Enter Contact Number", value="123-456-7890")
@@ -31,20 +29,33 @@ if 'edited_content' not in st.session_state:
 uploaded_file = st.file_uploader("Upload PDF Resume", type="pdf")
 
 if uploaded_file and st.button("Generate AI Draft"):
-    with st.spinner("Analyzing and formatting..."):
-        reader = PyPDF2.PdfReader(uploaded_file)
-        raw_text = "".join([p.extract_text() for p in reader.pages])
+    with st.spinner("Analyzing and formatting with Gemini 1.5 Flash..."):
+        try:
+            # Attempting to initialize the model
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
+            reader = PyPDF2.PdfReader(uploaded_file)
+            raw_text = "".join([p.extract_text() for p in reader.pages])
+            
+            prompt = f"""
+            Reformat this resume into these EXACT sections: SUMMARY:, SKILLS:, EDUCATION:, LICENSED CPA:, WORK EXPERIENCE:.
+            - All headers must be in ALL CAPS.
+            - For Work Experience/Education, use the format: 'Company Name/Degree | Date Range'
+            - Ensure the Job Title is on the very next line.
+            - No numbers before headers.
+            TEXT: {raw_text}
+            """
+            response = model.generate_content(prompt)
+            st.session_state.edited_content = response.text.replace("**", "")
         
-        prompt = f"""
-        Reformat this resume into these EXACT sections: SUMMARY:, SKILLS:, EDUCATION:, LICENSED CPA:, WORK EXPERIENCE:.
-        - All headers must be in ALL CAPS.
-        - For Work Experience/Education, use the format: 'Company Name/Degree | Date Range'
-        - Ensure the Job Title is on the very next line.
-        - No numbers before headers.
-        TEXT: {raw_text}
-        """
-        response = model.generate_content(prompt)
-        st.session_state.edited_content = response.text.replace("**", "")
+        except Exception as e:
+            # Fallback for "NotFound" errors by trying the full model path
+            try:
+                model = genai.GenerativeModel('models/gemini-1.5-flash')
+                response = model.generate_content(prompt)
+                st.session_state.edited_content = response.text.replace("**", "")
+            except Exception as e2:
+                st.error(f"AI Connection Error: {e2}. Please ensure your GEMINI_API_KEY is valid in Streamlit Secrets.")
 
 if st.session_state.edited_content:
     st.session_state.edited_content = st.text_area("Edit Window:", value=st.session_state.edited_content, height=450)
@@ -65,10 +76,9 @@ if st.session_state.edited_content:
         cell_right = head_table.rows[0].cells[1]
         p_right = cell_right.paragraphs[0]
         p_right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        p_right.paragraph_format.space_before = Pt(0) 
         
-        logo_path = logo_map[company_choice]
-        if os.path.exists(logo_path):
+        logo_path = logo_map.get(company_choice)
+        if logo_path and os.path.exists(logo_path):
             p_right.add_run().add_picture(logo_path, width=Inches(2.5))
         
         p_contact = cell_right.add_paragraph()
@@ -109,13 +119,13 @@ if st.session_state.edited_content:
                 last_line_was_table = False
                 continue
 
-            # SKILLS EXCEPTION: Keep as is
+            # SKILLS: Keep original text
             if "SKILLS:" in current_section:
                 doc.add_paragraph(line)
             
-            # WORK/EDUCATION: Table layout
+            # WORK/EDUCATION: Table layout for Date Alignment
             elif "|" in line:
-                # Spacing between entries (6pt to match headers)
+                # Spacer before new entry (6pt matches header space)
                 p_spacer = doc.add_paragraph()
                 p_spacer.paragraph_format.space_before = Pt(6)
                 
@@ -137,7 +147,7 @@ if st.session_state.edited_content:
             
             else:
                 p_body = doc.add_paragraph()
-                # Job Title (BOLD & CAPS)
+                # Job Title: BOLD & CAPS
                 if last_line_was_table and "WORK EXPERIENCE:" in current_section:
                     run_job = p_body.add_run(line.upper()) 
                     run_job.bold = True
@@ -154,10 +164,9 @@ if st.session_state.edited_content:
         f_text.bold = True
         f_text.font.color.rgb = RGBColor(0, 51, 153)
 
-        # Finalize and Save
         buf = io.BytesIO()
         doc.save(buf)
-        st.success("Resume Polished and Formatted!")
+        st.success("Download Ready!")
         st.download_button(
             label="Download Final Word Document",
             data=buf.getvalue(),
