@@ -7,113 +7,118 @@ import io
 import google.generativeai as genai
 import os
 
-# --- Page Config ---
-st.set_page_config(page_title="Corporate Resume Builder", layout="wide")
+# --- Page Setup ---
+st.set_page_config(page_title="Resume Formatter Pro", layout="wide")
 
-# --- UI Styling ---
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #007bff; color: white; }
-    </style>
-    """, unsafe_base_code=True)
+# --- API Setup (Gemini 2.5 Flash) ---
+if "GEMINI_API_KEY" not in st.secrets:
+    st.error("Please add GEMINI_API_KEY to Streamlit Secrets.")
+    st.stop()
 
-# --- API Setup ---
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Using the specific Gemini 2.5 Flash model name
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# --- Sidebar: Company Selection ---
-st.sidebar.title("🏢 Branding Settings")
+# --- Sidebar: Company Branding ---
+st.sidebar.title("🏢 Company Branding")
 company_choice = st.sidebar.selectbox(
-    "Select Sister Company",
+    "Select Logo to Apply:",
     ["W3G", "Synectics", "ProTouch"]
 )
 
-# Mapping logos to filenames (Make sure these are uploaded to your GitHub)
 logo_map = {
     "W3G": "w3g.png",
     "Synectics": "synectics.jpg",
     "ProTouch": "protouch.png"
 }
 
-# --- Step 1: Upload & Process ---
-st.title("📄 One-Click Professional Formatter")
-uploaded_file = st.file_uploader("Upload 'Before' Resume (PDF)", type="pdf")
+# --- Main App Interface ---
+st.title("📄 One-Click Resume Formatter")
+st.write(f"Currently Formatting for: **{company_choice}**")
 
-# Initialize session state for the editor
-if 'resume_content' not in st.session_state:
-    st.session_state.resume_content = ""
+# Initialize session state so text stays in the box when you edit it
+if 'edited_content' not in st.session_state:
+    st.session_state.edited_content = ""
+
+uploaded_file = st.file_uploader("Upload 'Before' Resume (PDF)", type="pdf")
 
 if uploaded_file:
     if st.button("Step 1: Generate AI Draft"):
-        with st.spinner("Extracting and Reformatting..."):
+        with st.spinner("AI is analyzing and reformatting..."):
+            # Read PDF
             reader = PyPDF2.PdfReader(uploaded_file)
             raw_text = "".join([p.extract_text() for p in reader.pages])
             
+            # AI Prompt tuned to your REFERENCE RESUME.docx
             prompt = f"""
-            Reformat this resume to match a high-end executive template.
-            Use these EXACT headers: Summary:, Skills:, Education:, Licensed CPA:, Work Experience:.
+            Act as a professional resume editor. Reformat the following text to match this EXACT structure:
+            1. Summary: (A concise paragraph)
+            2. Skills: (A clean list)
+            3. Education: (Degree, Date, and Institution)
+            4. Licensed CPA: (License details)
+            5. Work Experience: (Company, Dates, Title, and Bullet Points)
             
-            Formatting Rules:
-            - Put the candidate's Name at the very top.
-            - For Work Experience and Education, put the Dates on the same line as the Company/Degree.
-            - Clean up bullet points.
-            - Current Company for this output is {company_choice}.
+            Format dates to be on the same line as the Company/Degree.
+            The target branding is {company_choice}.
             
-            TEXT: {raw_text}
+            TEXT TO REFORMAT:
+            {raw_text}
             """
             response = model.generate_content(prompt)
-            st.session_state.resume_content = response.text.replace("**", "")
+            st.session_state.edited_content = response.text.replace("**", "")
 
-# --- Step 2: Live Editor ---
-if st.session_state.resume_content:
-    st.subheader("Step 2: Preview & Edit Window")
-    st.caption("Edit the text below. What you see is what will be saved to Word.")
+# --- Step 2: Preview and Edit Window ---
+if st.session_state.edited_content:
+    st.subheader("Step 2: Preview & Live Edit")
+    st.info("You can edit the text directly in the box below before downloading.")
     
-    # The Editor
-    edited_text = st.text_area(
-        label="Final Content Editor",
-        value=st.session_state.resume_content,
-        height=450
+    # This is the interactive window you asked for
+    st.session_state.edited_content = st.text_area(
+        "Resume Content", 
+        value=st.session_state.edited_content, 
+        height=500
     )
 
-    # --- Step 3: Export to Word ---
-    if st.button("Step 3: Export to Branded Word Doc"):
+    # --- Step 3: Create Branded Word Doc ---
+    if st.button("Step 3: Download Branded Word Doc"):
         doc = docx.Document()
         
-        # Add Logo if file exists
-        logo_path = logo_map[company_choice]
-        if os.path.exists(logo_path):
-            doc.add_picture(logo_path, width=Inches(1.5))
-            last_p = doc.paragraphs[-1]
-            last_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        # Add Logo to the Top Right (Matching Reference)
+        logo_file = logo_map[company_choice]
+        if os.path.exists(logo_file):
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            run = p.add_run()
+            run.add_picture(logo_file, width=Inches(1.8))
+        else:
+            st.warning(f"Note: {logo_file} not found in GitHub. Formatting text only.")
 
-        # Process the edited text into the Word Doc
-        lines = edited_text.split('\n')
-        for line in lines:
-            if any(header in line for header in ["Summary:", "Skills:", "Education:", "Licensed CPA:", "Work Experience:"]):
-                # Style Headers (Blue and Bold)
-                p = doc.add_paragraph()
+        # Add Content with Blue Headers (Matching Reference)
+        for line in st.session_state.edited_content.split('\n'):
+            p = doc.add_paragraph()
+            
+            # Identify Headers to apply Blue/Bold style
+            headers = ["Summary:", "Skills:", "Education:", "Licensed CPA:", "Work Experience:"]
+            if any(h in line for h in headers):
                 run = p.add_run(line)
                 run.bold = True
+                run.font.color.rgb = RGBColor(0, 51, 153) # Dark Blue from Reference
                 run.font.size = Pt(12)
-                run.font.color.rgb = RGBColor(0, 51, 153) # Dark Blue
-                # Add a bottom border (Simplified as a line)
                 p.paragraph_format.space_before = Pt(12)
             else:
-                p = doc.add_paragraph(line)
+                p.add_run(line)
                 p.paragraph_format.space_after = Pt(2)
-
-        # Save and Download
+        
+        # Buffer for download
         target = io.BytesIO()
         doc.save(target)
-        st.success(f"Successfully branded for {company_choice}!")
+        
+        st.success(f"Final Resume for {company_choice} is ready!")
         st.download_button(
-            label="⬇️ Download Final Resume",
+            label="⬇️ Download Final Word Document",
             data=target.getvalue(),
             file_name=f"Formatted_Resume_{company_choice}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-
 else:
     st.info("Upload a resume and click 'Generate' to begin.")
