@@ -20,6 +20,10 @@ contact_number = st.sidebar.text_input("Enter Contact Number", value="123-456-78
 
 logo_map = {"W3G": "w3g.png", "Synectics": "synectics.jpg", "ProTouch": "protouch.png"}
 
+# --- GLOBAL UNIFORM SPACING ---
+# This ensures the gap between Summary and Skills is identical to all other gaps
+UNIFORM_SPACE = Pt(10) 
+
 # --- Main App Interface ---
 st.title("📄 Professional Resume Builder")
 
@@ -32,30 +36,25 @@ if uploaded_file and st.button("Generate AI Draft"):
     with st.spinner("Analyzing and formatting with Gemini 2.5 Flash..."):
         try:
             model = genai.GenerativeModel('gemini-2.5-flash')
-            
             reader = PyPDF2.PdfReader(uploaded_file)
             raw_text = "".join([p.extract_text() for p in reader.pages])
             
-            # Updated Prompt: Original headers + Mandatory Summary + Bullet cues
             prompt = f"""
             Reformat this resume keeping ONLY its original sections, but change the headers to ALL CAPS and end them with a colon (e.g., EXPERIENCE:, EDUCATION:).
-            ALWAYS generate a 'SUMMARY:' section at the very beginning of the draft, summarizing the candidate, regardless of whether the original resume had one.
+            ALWAYS generate a 'SUMMARY:' section at the very beginning.
             For Work Experience/Education, use the EXACT format on a single line: 'Company Name/Degree | Date Range'.
-            Ensure the Job Title is on the very next line below the Company.
+            Ensure the Job Title/Role is on the very next line below the Company.
             For Skills, put each skill on a new line.
             Do not put numbers before headers.
             TEXT: {raw_text}
             """
             response = model.generate_content(prompt)
             st.session_state.edited_content = response.text.replace("**", "")
-        
         except Exception as e:
-            st.error(f"AI Connection Error: {e}. Ensure your API Key is valid.")
+            st.error(f"AI Connection Error: {e}")
 
 if st.session_state.edited_content:
     st.session_state.edited_content = st.text_area("Edit Window:", value=st.session_state.edited_content, height=450)
-    
-    # Checkbox to control Summary visibility in the final document
     include_summary = st.checkbox("Include AI-Generated Summary in Final Resume", value=True)
 
     if st.button("Download Final Word Doc"):
@@ -63,12 +62,10 @@ if st.session_state.edited_content:
         
         # --- 1. PAGE MARGINS ---
         section = doc.sections[0]
-        section.top_margin = Inches(0.4) 
-        section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.75)
-        section.right_margin = Inches(0.75)
+        section.top_margin, section.bottom_margin = Inches(0.4), Inches(0.5)
+        section.left_margin, section.right_margin = Inches(0.75), Inches(0.75)
 
-        # --- 2. LOGO AND TOP-RIGHT CONTACT ---
+        # --- 2. LOGO AND CONTACT ---
         head_table = doc.add_table(rows=1, cols=2)
         head_table.width = Inches(7.0)
         cell_right = head_table.rows[0].cells[1]
@@ -81,34 +78,29 @@ if st.session_state.edited_content:
         
         p_contact = cell_right.add_paragraph()
         p_contact.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        p_contact.paragraph_format.space_before = Pt(0)
         run_c = p_contact.add_run(f"If you would like to interview this\ncandidate, please call {contact_number}")
-        run_c.font.size = Pt(11)
-        run_c.bold = True
+        run_c.font.size, run_c.bold = Pt(11), True
 
         # --- 3. CENTERED "RESUME" TITLE ---
         res_p = doc.add_paragraph()
         res_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         res_run = res_p.add_run("RESUME")
-        res_run.bold = True
-        res_run.font.size = Pt(16)
-        res_p.paragraph_format.space_before = Pt(12)
-        res_p.paragraph_format.space_after = Pt(12)
+        res_run.bold, res_run.font.size = True, Pt(16)
+        res_p.paragraph_format.space_before = UNIFORM_SPACE
+        res_p.paragraph_format.space_after = UNIFORM_SPACE
 
         # --- 4. CONTENT FORMATTING ---
         current_section = ""
-        last_line_was_company_date = False
+        last_line_was_company = False
         skip_mode = False
 
         for line in st.session_state.edited_content.split('\n'):
             line = line.strip()
             if not line: continue
 
-            # Detect Headers dynamically (ALL CAPS ending with a colon)
+            # Header Detection (e.g., SUMMARY:, SKILLS:, EXPERIENCE:)
             if line.isupper() and line.endswith(":"):
                 current_section = line
-                
-                # Logic for the Checkbox: skip summary content if unchecked
                 if "SUMMARY" in line and not include_summary:
                     skip_mode = True
                     continue
@@ -116,79 +108,71 @@ if st.session_state.edited_content:
                     skip_mode = False
 
                 p = doc.add_paragraph()
-                p.paragraph_format.space_before = Pt(6) 
-                p.paragraph_format.space_after = Pt(6)  
-                p.paragraph_format.keep_with_next = True
+                p.paragraph_format.space_after = UNIFORM_SPACE # Gap below header
                 run = p.add_run(line) 
-                run.bold = True
-                run.font.size = Pt(12)
-                last_line_was_company_date = False
+                run.bold, run.font.size = True, Pt(12)
+                last_line_was_company = False
                 continue
                 
-            if skip_mode:
-                continue
+            if skip_mode: continue
 
-            # SKILLS: Force native Word Bullet Points
+            # SKILLS Section
             if "SKILL" in current_section:
                 clean_line = line.lstrip("*-• ").strip()
                 if clean_line:
                     p_skill = doc.add_paragraph(clean_line, style='List Bullet')
-                    p_skill.paragraph_format.space_after = Pt(2)
+                    p_skill.paragraph_format.space_after = UNIFORM_SPACE # Gap between skills
                 continue
             
-            # WORK/EDUCATION: Fixed-width Table layout for perfect Date Alignment
+            # EXPERIENCE/EDUCATION Section (Company | Date)
             elif "|" in line:
-                p_spacer = doc.add_paragraph()
-                p_spacer.paragraph_format.space_before = Pt(6)
-                
                 row_table = doc.add_table(rows=1, cols=2)
                 row_table.autofit = False
                 
-                # Lock column widths (Left: 5.5 inches, Right: 1.5 inches)
-                # This ensures the date ALWAYS starts at the exact same point
-                cell_left = row_table.rows[0].cells[0]
-                cell_right = row_table.rows[0].cells[1]
-                cell_left.width = Inches(5.5)
-                cell_right.width = Inches(1.5)
+                # Column Widths: Left (4.8") | Right (2.2" for single-line dates)
+                cell_left, cell_right = row_table.rows[0].cells[0], row_table.rows[0].cells[1]
+                cell_left.width, cell_right.width = Inches(4.8), Inches(2.2)
                 
                 parts = line.split("|")
                 
-                # Left: Company/Degree (BOLD & CAPS)
-                run_comp = cell_left.paragraphs[0].add_run(parts[0].strip().upper())
+                # Left Side: Company Name
+                p_l = cell_left.paragraphs[0]
+                p_l.paragraph_format.space_after = UNIFORM_SPACE # Gap below Company
+                run_comp = p_l.add_run(parts[0].strip().upper())
                 run_comp.bold = True
                 
-                # Right: Date Range (BOLD, ITALIC, Smaller font)
+                # Right Side: Date Range
                 p_d = cell_right.paragraphs[0]
                 p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                p_d.paragraph_format.space_after = UNIFORM_SPACE
                 run_date = p_d.add_run(parts[1].strip())
-                run_date.bold = True
-                run_date.italic = True
-                run_date.font.size = Pt(10) # Shrunk back to before size
+                run_date.bold, run_date.italic, run_date.font.size = True, True, Pt(10)
                 
-                last_line_was_company_date = True 
+                last_line_was_company = True 
             
+            # Role / University / Body Text
             else:
                 p_body = doc.add_paragraph()
-                # Job Title logic following the Company line
-                if last_line_was_company_date:
-                    run_job = p_body.add_run(line.title()) # Title Case (Small letters)
-                    run_job.bold = False                   # Explicitly unbolded
-                    last_line_was_company_date = False
+                p_body.paragraph_format.space_after = UNIFORM_SPACE # Gap after role/text
+                
+                if last_line_was_company:
+                    # Job Title/University: Title Case, Unbolded
+                    run_job = p_body.add_run(line.title())
+                    run_job.bold = False
+                    last_line_was_company = False
                 else:
                     p_body.add_run(line)
-                p_body.paragraph_format.space_after = Pt(2)
 
         # --- 5. BOTTOM FOOTER ---
         doc.add_paragraph()
         p_foot = doc.add_paragraph()
         p_foot.alignment = WD_ALIGN_PARAGRAPH.CENTER
         f_text = p_foot.add_run(f"If you would like to interview this candidate, please call {contact_number}")
-        f_text.bold = True
-        f_text.font.color.rgb = RGBColor(0, 51, 153)
+        f_text.bold, f_text.font.color.rgb = True, RGBColor(0, 51, 153)
 
         buf = io.BytesIO()
         doc.save(buf)
-        st.success("Resume Polished and Formatted!")
+        st.success("Uniform Spacing Applied!")
         st.download_button(
             label="Download Final Word Document",
             data=buf.getvalue(),
