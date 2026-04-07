@@ -1,70 +1,63 @@
 import streamlit as st
+import PyPDF2
+import docx
+import io
 import google.generativeai as genai
-from pypdf import PdfReader
+import os
 
-# 1. Setup Page Config
-st.set_page_config(page_title="Team Resume Re-Framer", page_icon="📄")
+# Set up the webpage
+st.title("📄 One-Click Resume Formatter")
+st.write("Upload a messy PDF resume, and we'll format it perfectly into a Word Document!")
 
-# 2. Sidebar for API Key (Team members can use one shared key)
-# For a "Zero Cost" shareable tool, you can hardcode the key or use Streamlit Secrets
-API_KEY = st.secrets["GEMINI_API_KEY"] if "GEMINI_API_KEY" in st.secrets else ""
+# Get the API key securely
+api_key = st.secrets["GEMINI_API_KEY"]
+genai.configure(api_key=api_key)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-if not API_KEY:
-    API_KEY = st.sidebar.text_input("Enter Gemini API Key", type="password")
+uploaded_file = st.file_uploader("Upload your Before Resume (PDF)", type="pdf")
 
-if API_KEY:
-    genai.configure(api_key=API_KEY)
-    model = genai.GenerativeModel('gemini-3-flash')
-
-    st.title("📄 Team Resume Reformatter")
-    st.info("Upload a raw PDF resume to convert it into our official team template.")
-
-    uploaded_file = st.file_uploader("Upload Resume (PDF)", type="pdf")
-
-    if uploaded_file:
-        with st.spinner("Reading and Reformatting..."):
-            # Extract Text
-            reader = PdfReader(uploaded_file)
+if uploaded_file is not None:
+    if st.button("Format My Resume"):
+        with st.spinner("Reading and formatting... Please wait."):
+            # 1. Read the PDF
+            pdf_reader = PyPDF2.PdfReader(uploaded_file)
             raw_text = ""
-            for page in reader.pages:
+            for page in pdf_reader.pages:
                 raw_text += page.extract_text()
 
-            # Define YOUR specific template here
+            # 2. Ask the AI to format it
             prompt = f"""
-            You are a professional resume parser. Take the raw text below and 
-            reformat it strictly into this Markdown template:
+            Take the following messy resume text and format it cleanly. 
+            Organize it strictly into these sections: 
+            1. Name at the top
+            2. Summary: (A brief paragraph)
+            3. Skills: (A clean list)
+            4. Education: (Degree, Date, Institution)
+            5. Licenses/Certifications: (If applicable)
+            6. Work Experience: (Company, Dates, Title, and bullet points of duties)
 
-            # [FULL NAME]
-            **Contact:** [Email] | [Phone] | [LinkedIn URL]
-            
-            ### PROFESSIONAL SUMMARY
-            [Write a 3-line summary based on their experience]
-
-            ### KEY STRENGTHS
-            * [Strength 1] | [Strength 2] | [Strength 3]
-
-            ### EXPERIENCE
-            [For each job, use this format:]
-            **[Job Title]** | [Company Name] | [Dates]
-            - [High-impact bullet point]
-            - [High-impact bullet point]
-
-            ### EDUCATION
-            [Degree] - [University]
-
-            ---
-            RAW TEXT TO PARSE:
+            Do not add any fake information. Just reorganize this text:
             {raw_text}
             """
 
-            # Get Result from AI
             response = model.generate_content(prompt)
-            
-            st.success("Done!")
-            st.markdown("---")
-            st.markdown(response.text)
-            
-            # Allow team to copy-paste or download
-            st.download_button("Download Text Version", response.text, file_name="formatted_resume.txt")
-else:
-    st.warning("Please enter the API Key in the sidebar to start.")
+            formatted_text = response.text
+
+            # 3. Create a Word Document
+            doc = docx.Document()
+            for line in formatted_text.split('\n'):
+                doc.add_paragraph(line)
+
+            # Save doc to memory
+            bio = io.BytesIO()
+            doc.save(bio)
+
+            st.success("Resume formatted successfully!")
+
+            # 4. Give the user a download button
+            st.download_button(
+                label="Download Formatted Resume (.docx)",
+                data=bio.getvalue(),
+                file_name="Formatted_Resume.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
