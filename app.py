@@ -2,7 +2,7 @@ import streamlit as st
 import PyPDF2
 import docx
 from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 import io
 import google.generativeai as genai
 import os
@@ -29,9 +29,9 @@ if 'edited_content' not in st.session_state:
 uploaded_file = st.file_uploader("Upload PDF Resume", type="pdf")
 
 if uploaded_file and st.button("Generate AI Draft"):
-    with st.spinner("Analyzing and formatting with Gemini 1.5 Flash..."):
+    with st.spinner("Analyzing and formatting with Gemini 2.5 Flash..."):
         try:
-            # Attempting to initialize the model
+            # Using the correct 2.5 Flash model
             model = genai.GenerativeModel('gemini-2.5-flash')
             
             reader = PyPDF2.PdfReader(uploaded_file)
@@ -49,13 +49,7 @@ if uploaded_file and st.button("Generate AI Draft"):
             st.session_state.edited_content = response.text.replace("**", "")
         
         except Exception as e:
-            # Fallback for "NotFound" errors by trying the full model path
-            try:
-                model = genai.GenerativeModel('models/gemini-1.5-flash')
-                response = model.generate_content(prompt)
-                st.session_state.edited_content = response.text.replace("**", "")
-            except Exception as e2:
-                st.error(f"AI Connection Error: {e2}. Please ensure your GEMINI_API_KEY is valid in Streamlit Secrets.")
+            st.error(f"AI Connection Error: {e}. Ensure your API Key is valid.")
 
 if st.session_state.edited_content:
     st.session_state.edited_content = st.text_area("Edit Window:", value=st.session_state.edited_content, height=450)
@@ -100,13 +94,13 @@ if st.session_state.edited_content:
         # --- 4. CONTENT FORMATTING ---
         headers = ["SUMMARY:", "SKILLS:", "EDUCATION:", "LICENSED CPA:", "WORK EXPERIENCE:"]
         current_section = ""
-        last_line_was_table = False
+        last_line_was_company_date = False
 
         for line in st.session_state.edited_content.split('\n'):
             line = line.strip()
             if not line: continue
 
-            # Header Styling: BOLD, CAPS, 6pt (0.5 line) space
+            # Header Styling: BOLD, CAPS, 6pt before and 6pt after
             if any(h in line.upper() for h in headers):
                 current_section = line.upper()
                 p = doc.add_paragraph()
@@ -116,42 +110,48 @@ if st.session_state.edited_content:
                 run = p.add_run(line.upper()) 
                 run.bold = True
                 run.font.size = Pt(12)
-                last_line_was_table = False
+                last_line_was_company_date = False
                 continue
 
-            # SKILLS: Keep original text
+            # SKILLS: Keep exactly as they are without formatting changes
             if "SKILLS:" in current_section:
                 doc.add_paragraph(line)
             
-            # WORK/EDUCATION: Table layout for Date Alignment
+            # WORK/EDUCATION: Clean Tab Stop layout to perfect the spacing
             elif "|" in line:
-                # Spacer before new entry (6pt matches header space)
-                p_spacer = doc.add_paragraph()
-                p_spacer.paragraph_format.space_before = Pt(6)
+                p_job = doc.add_paragraph()
+                # 12pt space directly applied to the paragraph matches the visual 
+                # gap (6pt + 6pt) created around the headers
+                p_job.paragraph_format.space_before = Pt(12)
+                p_job.paragraph_format.space_after = Pt(0)
                 
-                row_table = doc.add_table(rows=1, cols=2)
-                row_table.width = Inches(7.0)
+                # Set right-aligned tab stop for the Date Range
+                tab_stops = p_job.paragraph_format.tab_stops
+                tab_stops.add_tab_stop(Inches(7.0), WD_TAB_ALIGNMENT.RIGHT)
+                
                 parts = line.split("|")
                 
-                # Left: Company/Degree (BOLD & CAPS)
-                row_table.rows[0].cells[0].paragraphs[0].add_run(parts[0].strip().upper()).bold = True
+                # Left Side: Company/Degree (BOLD & CAPS)
+                run_comp = p_job.add_run(parts[0].strip().upper())
+                run_comp.bold = True
                 
-                # Right: Date Range (BOLD & ITALIC)
-                p_d = row_table.rows[0].cells[1].paragraphs[0]
-                p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                run_date = p_d.add_run(parts[1].strip())
+                # Insert the Tab
+                p_job.add_run("\t")
+                
+                # Right Side: Date Range (BOLD & ITALIC)
+                run_date = p_job.add_run(parts[1].strip())
                 run_date.bold = True
                 run_date.italic = True
                 
-                last_line_was_table = True 
+                last_line_was_company_date = True 
             
             else:
                 p_body = doc.add_paragraph()
-                # Job Title: BOLD & CAPS
-                if last_line_was_table and "WORK EXPERIENCE:" in current_section:
+                # Job Title: BOLD & CAPS immediately following the Company/Date
+                if last_line_was_company_date and "WORK EXPERIENCE:" in current_section:
                     run_job = p_body.add_run(line.upper()) 
                     run_job.bold = True
-                    last_line_was_table = False
+                    last_line_was_company_date = False
                 else:
                     p_body.add_run(line)
                 p_body.paragraph_format.space_after = Pt(2)
@@ -166,7 +166,7 @@ if st.session_state.edited_content:
 
         buf = io.BytesIO()
         doc.save(buf)
-        st.success("Download Ready!")
+        st.success("Resume Polished and Formatted!")
         st.download_button(
             label="Download Final Word Document",
             data=buf.getvalue(),
