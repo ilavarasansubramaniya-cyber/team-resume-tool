@@ -70,10 +70,8 @@ if st.session_state.edited_content:
         
         logo_path = logo_map[company_choice]
         if os.path.exists(logo_path):
-            # Large logo as requested
             p_right.add_run().add_picture(logo_path, width=Inches(2.5))
         
-        # Interview Call (Bigger, Bold, and stacked tight)
         p_contact = cell_right.add_paragraph()
         p_contact.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         p_contact.paragraph_format.space_before = Pt(0)
@@ -99,26 +97,26 @@ if st.session_state.edited_content:
             line = line.strip()
             if not line: continue
 
-            # Header Styling: BOLD, CAPS, 0.5 line space (6pt)
+            # Header Styling: BOLD, CAPS, 6pt (0.5 line) space [cite: 26, 84]
             if any(h in line.upper() for h in headers):
                 current_section = line.upper()
                 p = doc.add_paragraph()
                 p.paragraph_format.space_before = Pt(6) 
                 p.paragraph_format.space_after = Pt(6)  
                 p.paragraph_format.keep_with_next = True
-                run = p.add_run(line.upper()) # Force Caps [cite: 26, 52, 59, 66, 73, 79]
+                run = p.add_run(line.upper()) 
                 run.bold = True
                 run.font.size = Pt(12)
                 last_line_was_table = False
                 continue
 
-            # SKILLS EXCEPTION: Do not process vertical lines, keep original formatting
+            # SKILLS EXCEPTION: Original formatting [cite: 8-19]
             if "SKILLS:" in current_section:
                 doc.add_paragraph(line)
             
-            # WORK/EDUCATION: Table layout for Date Alignment
+            # WORK/EDUCATION: Table layout [cite: 20-23, 27-84]
             elif "|" in line:
-                # Add 0.5 line space (6pt) between different jobs/degrees
+                # Spacing between entries: Set to 6pt to match Header spacing
                 p_spacer = doc.add_paragraph()
                 p_spacer.paragraph_format.space_before = Pt(6)
                 
@@ -126,10 +124,10 @@ if st.session_state.edited_content:
                 row_table.width = Inches(7.0)
                 parts = line.split("|")
                 
-                # Left: Company/Degree (BOLD & CAPS) [cite: 27, 35, 43, 51, 58, 65, 72, 78]
+                # Left: Company/Degree (BOLD & CAPS)
                 row_table.rows[0].cells[0].paragraphs[0].add_run(parts[0].strip().upper()).bold = True
                 
-                # Right: Date Range (BOLD & ITALIC) [cite: 21, 22, 23, 27, 35, 43, 51, 58, 65, 72, 78]
+                # Right: Date Range (BOLD & ITALIC)
                 p_d = row_table.rows[0].cells[1].paragraphs[0]
                 p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 run_date = p_d.add_run(parts[1].strip())
@@ -140,22 +138,22 @@ if st.session_state.edited_content:
             
             else:
                 p_body = doc.add_paragraph()
-                # If this line follows a company name in Work Experience, it's the Job Title
+                # Job Title (BOLD & CAPS) [cite: 28, 36, 59, 66, 73, 79]
                 if last_line_was_table and "WORK EXPERIENCE:" in current_section:
-                    run_job = p_body.add_run(line.upper()) # BOLD & CAPS [cite: 28, 36, 44, 52, 59, 66, 73, 79]
+                    run_job = p_body.add_run(line.upper()) 
                     run_job.bold = True
                     last_line_was_table = False
                 else:
                     p_body.add_run(line)
                 p_body.paragraph_format.space_after = Pt(2)
 
-        # --- 5. BOTTOM FOOTER CALL TO ACTION ---
+        # --- 5. BOTTOM FOOTER ---
         doc.add_paragraph()
         p_foot = doc.add_paragraph()
         p_foot.alignment = WD_ALIGN_PARAGRAPH.CENTER
         f_text = p_foot.add_run(f"If you would like to interview this candidate, please call {contact_number}")
         f_text.bold = True
-        f_text.font.color.rgb = RGBColor(0, 51, 153) # [cite: 85]
+        f_text.font.color.rgb = RGBColor(0, 51, 153) [cite: 85]
 
         # Finalize and Save
         buf = io.BytesIO()
