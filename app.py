@@ -14,7 +14,7 @@ if "GEMINI_API_KEY" not in st.secrets:
 
 # Connect to Google AI
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 uploaded_file = st.file_uploader("Upload Before Resume (PDF)", type="pdf")
 
