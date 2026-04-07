@@ -3,79 +3,74 @@ import PyPDF2
 import docx
 import io
 import google.generativeai as genai
-import os
 
-# Set up the webpage
+# Page Setup
 st.set_page_config(page_title="Resume Formatter", page_icon="📄")
 st.title("📄 One-Click Resume Formatter")
-st.write("Upload a messy PDF resume, and we'll format it perfectly into a Word Document!")
+st.write("Upload a messy PDF, and we'll format it into a professional Word Doc!")
 
-# Securely get the API key
+# API Configuration
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=api_key)
-    # We are using 'gemini-pro' as it is the most stable name
-    model = genai.GenerativeModel('gemini-pro')
+    # Updated to the most current, high-speed model
+    model = genai.GenerativeModel('gemini-1.5-flash')
 except Exception as e:
-    st.error("Missing API Key. Please add GEMINI_API_KEY to Streamlit Secrets.")
+    st.error("Setup Error: Please check your Streamlit Secrets for the GEMINI_API_KEY.")
     st.stop()
 
 uploaded_file = st.file_uploader("Upload your Before Resume (PDF)", type="pdf")
 
 if uploaded_file is not None:
     if st.button("Format My Resume"):
-        with st.spinner("AI is re-writing your resume..."):
+        with st.spinner("AI is analyzing and re-writing..."):
             try:
-                # 1. Read the PDF
+                # 1. Extract Text from PDF
                 pdf_reader = PyPDF2.PdfReader(uploaded_file)
                 raw_text = ""
                 for page in pdf_reader.pages:
-                    text = page.extract_text()
-                    if text:
-                        raw_text += text
+                    content = page.extract_text()
+                    if content:
+                        raw_text += content
 
-                # 2. Ask the AI to format it
+                # 2. AI Formatting Prompt
                 prompt = f"""
-                You are a professional resume writer. Reformat the following text into a clean, 
-                professional resume. 
+                Reformat the following resume text into a professional structure. 
+                Use these specific sections: Summary, Skills, Education, Licensed CPA, and Work Experience.
+                Ensure the Work Experience is in reverse chronological order.
                 
-                STRICT STRUCTURE TO FOLLOW:
-                - Name at the top
-                - Summary Section
-                - Skills Section (Bullet points)
-                - Education Section
-                - Licenses Section
-                - Work Experience Section (Company, Title, Dates, and clear Bullet Points)
-                
-                Text to format:
+                RESUME TEXT:
                 {raw_text}
                 """
                 
+                # Generate content
                 response = model.generate_content(prompt)
                 
                 if response.text:
-                    formatted_text = response.text
-
-                    # 3. Create a Word Document
+                    # 3. Create Word Document
                     doc = docx.Document()
-                    for line in formatted_text.split('\n'):
-                        doc.add_paragraph(line)
+                    # Add a title
+                    doc.add_heading('Formatted Resume', 0)
                     
+                    for line in response.text.split('\n'):
+                        # Clean up AI markdown stars if present
+                        clean_line = line.replace('**', '').replace('__', '')
+                        doc.add_paragraph(clean_line)
+                    
+                    # Save to memory
                     bio = io.BytesIO()
                     doc.save(bio)
                     
-                    st.success("Done! Your resume is ready.")
+                    st.success("Success! Your resume has been reformatted.")
                     
-                    # 4. Download button
+                    # 4. Download
                     st.download_button(
                         label="Download Formatted Resume (.docx)",
                         data=bio.getvalue(),
                         file_name="Formatted_Resume.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
-                else:
-                    st.error("The AI couldn't read the text. Try a different PDF.")
             
             except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
-                st.info("Tip: Make sure your Gemini API key is active in Google AI Studio.")
+                st.error(f"AI Connection Error: {str(e)}")
+                st.info("Check if your API key is correct in the Streamlit 'Secrets' setting.")
