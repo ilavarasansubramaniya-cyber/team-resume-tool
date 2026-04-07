@@ -8,20 +8,21 @@ import google.generativeai as genai
 import os
 
 # --- Page Setup ---
-st.set_page_config(page_title="Executive Resume Formatter", layout="wide")
+st.set_page_config(page_title="Executive Resume Builder", layout="wide")
 
 # --- AI Configuration ---
+# Ensure GEMINI_API_KEY is added to your Streamlit Secrets
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 # --- Sidebar Controls ---
-st.sidebar.title("🏢 Selection & ID")
+st.sidebar.title("🏢 Branding & ID")
 company_choice = st.sidebar.selectbox("Select Sister Company", ["W3G", "Synectics", "ProTouch"])
 contact_number = st.sidebar.text_input("Enter Contact Number", value="123-456-7890")
 
 logo_map = {"W3G": "w3g.png", "Synectics": "synectics.jpg", "ProTouch": "protouch.png"}
 
-# --- Main Interface ---
+# --- Main App Interface ---
 st.title("📄 Professional Resume Builder")
 
 if 'edited_content' not in st.session_state:
@@ -30,10 +31,11 @@ if 'edited_content' not in st.session_state:
 uploaded_file = st.file_uploader("Upload PDF Resume", type="pdf")
 
 if uploaded_file and st.button("Generate AI Draft"):
-    with st.spinner("Reformatting data..."):
+    with st.spinner("Analyzing and formatting..."):
         reader = PyPDF2.PdfReader(uploaded_file)
         raw_text = "".join([p.extract_text() for p in reader.pages])
         
+        # AI Prompt for specific structuring [cite: 2-26]
         prompt = f"""
         Reformat this resume into these EXACT sections: SUMMARY:, SKILLS:, EDUCATION:, LICENSED CPA:, WORK EXPERIENCE:.
         - All headers must be in ALL CAPS.
@@ -51,35 +53,44 @@ if st.session_state.edited_content:
     if st.button("Download Final Word Doc"):
         doc = docx.Document()
         
-        # --- 1. TOP-RIGHT BRANDING (Logo moved up) ---
+        # --- 1. PAGE MARGINS (Moves everything up safely) ---
+        section = doc.sections[0]
+        section.top_margin = Inches(0.5) 
+        section.bottom_margin = Inches(0.5)
+        section.left_margin = Inches(0.75)
+        section.right_margin = Inches(0.75)
+
+        # --- 2. LOGO AND TOP-RIGHT CONTACT ---
         head_table = doc.add_table(rows=1, cols=2)
-        head_table.width = Inches(6.5)
+        head_table.width = Inches(7.0)
         cell_right = head_table.rows[0].cells[1]
         p_right = cell_right.paragraphs[0]
         p_right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        # Set negative space to move logo "up"
-        p_right.paragraph_format.space_before = Pt(-20) 
+        p_right.paragraph_format.space_before = Pt(0) 
         
         logo_path = logo_map[company_choice]
         if os.path.exists(logo_path):
+            # Large logo as requested
             p_right.add_run().add_picture(logo_path, width=Inches(2.5))
         
-        # Interview Call (Bigger and Bold)
+        # Interview Call (Bigger, Bold, and stacked tight)
         p_contact = cell_right.add_paragraph()
         p_contact.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        p_contact.paragraph_format.space_before = Pt(0)
         run_c = p_contact.add_run(f"If you would like to interview this\ncandidate, please call {contact_number}")
-        run_c.font.size = Pt(11) # Bigger
-        run_c.bold = True        # Bold
+        run_c.font.size = Pt(11)
+        run_c.bold = True
 
-        # --- 2. CENTERED "RESUME" ---
+        # --- 3. CENTERED "RESUME" TITLE ---
         res_p = doc.add_paragraph()
         res_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         res_run = res_p.add_run("RESUME")
         res_run.bold = True
         res_run.font.size = Pt(16)
+        res_p.paragraph_format.space_before = Pt(12)
         res_p.paragraph_format.space_after = Pt(12)
 
-        # --- 3. CONTENT FORMATTING ---
+        # --- 4. CONTENT FORMATTING ---
         headers = ["SUMMARY:", "SKILLS:", "EDUCATION:", "LICENSED CPA:", "WORK EXPERIENCE:"]
         current_section = ""
         last_line_was_table = False
@@ -88,64 +99,71 @@ if st.session_state.edited_content:
             line = line.strip()
             if not line: continue
 
-            # Header Styling
+            # Header Styling: BOLD, CAPS, 0.5 line space (6pt)
             if any(h in line.upper() for h in headers):
                 current_section = line.upper()
                 p = doc.add_paragraph()
                 p.paragraph_format.space_before = Pt(6) 
                 p.paragraph_format.space_after = Pt(6)  
-                run = p.add_run(line.upper())
+                p.paragraph_format.keep_with_next = True
+                run = p.add_run(line.upper()) # Force Caps [cite: 26, 52, 59, 66, 73, 79]
                 run.bold = True
                 run.font.size = Pt(12)
                 last_line_was_table = False
                 continue
 
-            # SKILLS EXCEPTION: Keep vertical lines as they are
+            # SKILLS EXCEPTION: Do not process vertical lines, keep original formatting
             if "SKILLS:" in current_section:
                 doc.add_paragraph(line)
             
-            # WORK/EDUCATION: Table layout with BOLD YEARS
+            # WORK/EDUCATION: Table layout for Date Alignment
             elif "|" in line:
-                # Add 0.5 line space (6pt) between entries
+                # Add 0.5 line space (6pt) between different jobs/degrees
                 p_spacer = doc.add_paragraph()
                 p_spacer.paragraph_format.space_before = Pt(6)
                 
                 row_table = doc.add_table(rows=1, cols=2)
-                row_table.width = Inches(6.5)
+                row_table.width = Inches(7.0)
                 parts = line.split("|")
                 
-                # Left: Company/Degree (Bold & Caps)
+                # Left: Company/Degree (BOLD & CAPS) [cite: 27, 35, 43, 51, 58, 65, 72, 78]
                 row_table.rows[0].cells[0].paragraphs[0].add_run(parts[0].strip().upper()).bold = True
                 
-                # Right: Years (Bold & Italic)
+                # Right: Date Range (BOLD & ITALIC) [cite: 21, 22, 23, 27, 35, 43, 51, 58, 65, 72, 78]
                 p_d = row_table.rows[0].cells[1].paragraphs[0]
                 p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                run_year = p_d.add_run(parts[1].strip())
-                run_year.bold = True
-                run_year.italic = True
+                run_date = p_d.add_run(parts[1].strip())
+                run_date.bold = True
+                run_date.italic = True
                 
                 last_line_was_table = True 
             
             else:
                 p_body = doc.add_paragraph()
-                # Bold & Caps for Job Title following a company line
+                # If this line follows a company name in Work Experience, it's the Job Title
                 if last_line_was_table and "WORK EXPERIENCE:" in current_section:
-                    run_job = p_body.add_run(line.upper())
+                    run_job = p_body.add_run(line.upper()) # BOLD & CAPS [cite: 28, 36, 44, 52, 59, 66, 73, 79]
                     run_job.bold = True
                     last_line_was_table = False
                 else:
                     p_body.add_run(line)
                 p_body.paragraph_format.space_after = Pt(2)
 
-        # --- 4. BOTTOM FOOTER ---
+        # --- 5. BOTTOM FOOTER CALL TO ACTION ---
         doc.add_paragraph()
         p_foot = doc.add_paragraph()
         p_foot.alignment = WD_ALIGN_PARAGRAPH.CENTER
         f_text = p_foot.add_run(f"If you would like to interview this candidate, please call {contact_number}")
         f_text.bold = True
-        f_text.font.color.rgb = RGBColor(0, 51, 153)
+        f_text.font.color.rgb = RGBColor(0, 51, 153) # [cite: 85]
 
+        # Finalize and Save
         buf = io.BytesIO()
         doc.save(buf)
-        st.success("Resume Polished!")
-        st.download_button("Download Final Resume", buf.getvalue(), f"Formatted_Resume.docx")
+        st.success("Resume Polished and Formatted!")
+        st.download_button(
+            label="Download Final Word Document",
+            data=buf.getvalue(),
+            file_name=f"Formatted_Resume_{company_choice}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
