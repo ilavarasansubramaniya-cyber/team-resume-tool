@@ -34,11 +34,10 @@ if uploaded_file and st.button("Generate AI Draft"):
         reader = PyPDF2.PdfReader(uploaded_file)
         raw_text = "".join([p.extract_text() for p in reader.pages])
         
-        # Explicit instructions for AI formatting
         prompt = f"""
         Reformat this resume into these EXACT sections: SUMMARY:, SKILLS:, EDUCATION:, LICENSED CPA:, WORK EXPERIENCE:.
         - All headers must be in ALL CAPS.
-        - For Work Experience, use the format: 'Company Name | Date Range'
+        - For Work Experience/Education, use the format: 'Company Name/Degree | Date Range'
         - Ensure the Job Title is on the very next line.
         - No numbers before headers.
         TEXT: {raw_text}
@@ -52,26 +51,27 @@ if st.session_state.edited_content:
     if st.button("Download Final Word Doc"):
         doc = docx.Document()
         
-        # --- 1. TOP-RIGHT BRANDING ---
+        # --- 1. TOP-RIGHT BRANDING (Logo moved up) ---
         head_table = doc.add_table(rows=1, cols=2)
         head_table.width = Inches(6.5)
         cell_right = head_table.rows[0].cells[1]
         p_right = cell_right.paragraphs[0]
         p_right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        # Set negative space to move logo "up"
+        p_right.paragraph_format.space_before = Pt(-20) 
         
-        # Large Logo
         logo_path = logo_map[company_choice]
         if os.path.exists(logo_path):
             p_right.add_run().add_picture(logo_path, width=Inches(2.5))
         
-        # Interview Call-to-Action
+        # Interview Call (Bigger and Bold)
         p_contact = cell_right.add_paragraph()
         p_contact.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         run_c = p_contact.add_run(f"If you would like to interview this\ncandidate, please call {contact_number}")
-        run_c.font.size = Pt(9)
-        run_c.italic = True
+        run_c.font.size = Pt(11) # Bigger
+        run_c.bold = True        # Bold
 
-        # --- 2. CENTERED "RESUME" TITLE ---
+        # --- 2. CENTERED "RESUME" ---
         res_p = doc.add_paragraph()
         res_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         res_run = res_p.add_run("RESUME")
@@ -82,51 +82,57 @@ if st.session_state.edited_content:
         # --- 3. CONTENT FORMATTING ---
         headers = ["SUMMARY:", "SKILLS:", "EDUCATION:", "LICENSED CPA:", "WORK EXPERIENCE:"]
         current_section = ""
-        last_line_was_company = False
+        last_line_was_table = False
 
         for line in st.session_state.edited_content.split('\n'):
             line = line.strip()
             if not line: continue
 
-            # Header Styling: BOLD, CAPS, 0.5 line space (6pt)
+            # Header Styling
             if any(h in line.upper() for h in headers):
                 current_section = line.upper()
                 p = doc.add_paragraph()
                 p.paragraph_format.space_before = Pt(6) 
                 p.paragraph_format.space_after = Pt(6)  
-                p.paragraph_format.keep_with_next = True
                 run = p.add_run(line.upper())
                 run.bold = True
                 run.font.size = Pt(12)
-                last_line_was_company = False
+                last_line_was_table = False
                 continue
 
-            # Skills logic: Use bullet points
-            if "SKILLS:" in current_section and "|" in line:
-                for s in line.split("|"):
-                    doc.add_paragraph(s.strip(), style='List Bullet')
+            # SKILLS EXCEPTION: Keep vertical lines as they are
+            if "SKILLS:" in current_section:
+                doc.add_paragraph(line)
             
-            # Company | Date Logic: BOLD, CAPS
+            # WORK/EDUCATION: Table layout with BOLD YEARS
             elif "|" in line:
+                # Add 0.5 line space (6pt) between entries
+                p_spacer = doc.add_paragraph()
+                p_spacer.paragraph_format.space_before = Pt(6)
+                
                 row_table = doc.add_table(rows=1, cols=2)
                 row_table.width = Inches(6.5)
                 parts = line.split("|")
-                # Company Name in CAPS & BOLD
-                comp_run = row_table.rows[0].cells[0].paragraphs[0].add_run(parts[0].strip().upper())
-                comp_run.bold = True
-                # Date on Right (Italic)
+                
+                # Left: Company/Degree (Bold & Caps)
+                row_table.rows[0].cells[0].paragraphs[0].add_run(parts[0].strip().upper()).bold = True
+                
+                # Right: Years (Bold & Italic)
                 p_d = row_table.rows[0].cells[1].paragraphs[0]
                 p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                p_d.add_run(parts[1].strip()).italic = True
-                last_line_was_company = True 
+                run_year = p_d.add_run(parts[1].strip())
+                run_year.bold = True
+                run_year.italic = True
+                
+                last_line_was_table = True 
             
             else:
                 p_body = doc.add_paragraph()
-                # If following a company line, this is the Job Title: BOLD & CAPS
-                if last_line_was_company and "WORK EXPERIENCE:" in current_section:
+                # Bold & Caps for Job Title following a company line
+                if last_line_was_table and "WORK EXPERIENCE:" in current_section:
                     run_job = p_body.add_run(line.upper())
                     run_job.bold = True
-                    last_line_was_company = False
+                    last_line_was_table = False
                 else:
                     p_body.add_run(line)
                 p_body.paragraph_format.space_after = Pt(2)
@@ -139,8 +145,7 @@ if st.session_state.edited_content:
         f_text.bold = True
         f_text.font.color.rgb = RGBColor(0, 51, 153)
 
-        # Finalize
         buf = io.BytesIO()
         doc.save(buf)
-        st.success("Resume Polished and Ready!")
+        st.success("Resume Polished!")
         st.download_button("Download Final Resume", buf.getvalue(), f"Formatted_Resume.docx")
