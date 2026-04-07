@@ -3,6 +3,7 @@ import PyPDF2
 import docx
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.section import WD_SECTION
 import io
 import google.generativeai as genai
 import os
@@ -17,7 +18,7 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 # --- Sidebar ---
 st.sidebar.title("🏢 Branding & ID")
 company_choice = st.sidebar.selectbox("Select Sister Company", ["W3G", "Synectics", "ProTouch"])
-contact_info = st.sidebar.text_input("Enter Reference/Phone Number", value="123-456-7890")
+contact_number = st.sidebar.text_input("Enter Contact Number", value="123-456-7890")
 
 logo_map = {"W3G": "w3g.png", "Synectics": "synectics.jpg", "ProTouch": "protouch.png"}
 
@@ -35,9 +36,10 @@ if uploaded_file and st.button("Generate AI Draft"):
         raw_text = "".join([p.extract_text() for p in reader.pages])
         
         prompt = f"""
-        Reformat this resume into: Summary:, Skills:, Education:, Licensed CPA:, Work Experience:.
-        - Use 'Company/Degree | Date' format for jobs and education.
-        - Ensure NO numbers before headers.
+        Reformat this resume into: SUMMARY:, SKILLS:, EDUCATION:, LICENSED CPA:, WORK EXPERIENCE:.
+        - Force all Headers to CAPS.
+        - Format jobs as: 'Company Name | Date Range'
+        - Followed by Job Title in CAPS on the next line.
         TEXT: {raw_text}
         """
         response = model.generate_content(prompt)
@@ -49,86 +51,101 @@ if st.session_state.edited_content:
     if st.button("Download Final Word Doc"):
         doc = docx.Document()
         
-        # --- 1. TOP BORDER FRAME ---
+        # --- 1. FULL PAGE BORDER (EVERY PAGE) ---
+        # We add the frame to the Header so it repeats on every page
+        section = doc.sections[0]
+        header = section.header
         if os.path.exists("Frame PNG.jpg"):
-            # This spans the top of the page
-            doc.add_picture("Frame PNG.jpg", width=Inches(6.5))
-        
-        # --- 2. LOGO AND CONTACT DETAILS (TOP RIGHT) ---
-        # Create a table for alignment
+            header_para = header.paragraphs[0]
+            run_frame = header_para.add_run()
+            # Set the image to fill the page (adjust width/height based on your image aspect ratio)
+            run_frame.add_picture("Frame PNG.jpg", width=Inches(8.5), height=Inches(11)) 
+            
+        # Adjust margins to ensure content stays "inside" the border
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+
+        # --- 2. LOGO AND TOP-RIGHT CONTACT ---
         head_table = doc.add_table(rows=1, cols=2)
         head_table.width = Inches(6.5)
-        
-        # Right Cell: Logo then Contact Details below it
         cell_right = head_table.rows[0].cells[1]
         p_right = cell_right.paragraphs[0]
         p_right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         
-        # Add Logo
         logo_path = logo_map[company_choice]
         if os.path.exists(logo_path):
-            p_right.add_run().add_picture(logo_path, width=Inches(1.5))
+            p_right.add_run().add_picture(logo_path, width=Inches(2.5))
         
-        # Add Contact Detail line immediately below logo
         p_contact = cell_right.add_paragraph()
         p_contact.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        run_contact = p_contact.add_run(f"Ref: {contact_info}")
-        run_contact.font.size = Pt(10)
-        run_contact.bold = True
+        run_c = p_contact.add_run(f"If you would like to interview this\ncandidate, please call {contact_number}")
+        run_c.font.size = Pt(9)
+        run_c.italic = True
 
-        # --- 3. CONTENT FORMATTING ---
-        headers = ["Summary:", "Skills:", "Education:", "Licensed CPA:", "Work Experience:"]
+        # --- 3. CENTERED "RESUME" TITLE ---
+        res_p = doc.add_paragraph()
+        res_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        res_run = res_p.add_run("RESUME")
+        res_run.bold = True
+        res_run.font.size = Pt(16)
+
+        # --- 4. CONTENT FORMATTING ---
+        headers = ["SUMMARY:", "SKILLS:", "EDUCATION:", "LICENSED CPA:", "WORK EXPERIENCE:"]
         current_section = ""
+        last_line_was_company = False
 
-        lines = st.session_state.edited_content.split('\n')
-        for line in lines:
+        for line in st.session_state.edited_content.split('\n'):
             line = line.strip()
             if not line: continue
 
-            # Header Styling (Black, Bold, Space Before & After)
+            # Header Styling (0.5 line gap = 6pt)
             if any(h in line for h in headers):
                 current_section = line
-                doc.add_paragraph() # 1 line space before
                 p = doc.add_paragraph()
-                p.paragraph_format.keep_with_next = True
-                run = p.add_run(line)
+                p.paragraph_format.space_before = Pt(6) 
+                p.paragraph_format.space_after = Pt(6)  
+                run = p.add_run(line.upper())
                 run.bold = True
                 run.font.size = Pt(12)
-                run.font.color.rgb = RGBColor(0, 0, 0)
-                doc.add_paragraph() # 1 line space after
+                last_line_was_company = False
                 continue
 
-            # Skills logic: split by pipe to new lines
-            if "Skills:" in current_section and "|" in line:
+            # Skills logic
+            if "SKILLS:" in current_section and "|" in line:
                 for s in line.split("|"):
                     doc.add_paragraph(s.strip(), style='List Bullet')
             
-            # Education/Work logic: Date only to the right
+            # Company | Date Logic (CAPS & BOLD)
             elif "|" in line:
                 row_table = doc.add_table(rows=1, cols=2)
                 row_table.width = Inches(6.5)
                 parts = line.split("|")
-                
-                # Left: Company/Title
-                row_table.rows[0].cells[0].paragraphs[0].add_run(parts[0].strip()).bold = True
-                # Right: Date Range
-                p_date = row_table.rows[0].cells[1].paragraphs[0]
-                p_date.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                p_date.add_run(parts[1].strip()).italic = True
+                comp_run = row_table.rows[0].cells[0].paragraphs[0].add_run(parts[0].strip().upper())
+                comp_run.bold = True
+                p_d = row_table.rows[0].cells[1].paragraphs[0]
+                p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                p_d.add_run(parts[1].strip()).italic = True
+                last_line_was_company = True 
             
             else:
-                doc.add_paragraph(line)
+                p_body = doc.add_paragraph()
+                if last_line_was_company and "WORK EXPERIENCE:" in current_section:
+                    run_job = p_body.add_run(line.upper())
+                    run_job.bold = True
+                    last_line_was_company = False
+                else:
+                    p_body.add_run(line)
 
-        # --- 4. BOTTOM INTERVIEW CALL ---
-        doc.add_paragraph() 
-        doc.add_paragraph() 
+        # --- 5. BOTTOM CALL TO ACTION ---
+        doc.add_paragraph()
         p_foot = doc.add_paragraph()
         p_foot.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        f_text = p_foot.add_run(f"If you would like to interview this candidate, please call {contact_info}")
+        f_text = p_foot.add_run(f"If you would like to interview this candidate, please call {contact_number}")
         f_text.bold = True
         f_text.font.color.rgb = RGBColor(0, 51, 153)
 
-        # Buffer & Download
         buf = io.BytesIO()
         doc.save(buf)
-        st.download_button("Download Final Resume", buf.getvalue(), f"Resume_{company_choice}.docx")
+        st.download_button("Download Final Resume", buf.getvalue(), f"Final_Resume_{company_choice}.docx")
