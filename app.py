@@ -2,7 +2,7 @@ import streamlit as st
 import PyPDF2
 import docx
 from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 import google.generativeai as genai
 import os
@@ -31,18 +31,19 @@ uploaded_file = st.file_uploader("Upload PDF Resume", type="pdf")
 if uploaded_file and st.button("Generate AI Draft"):
     with st.spinner("Analyzing and formatting with Gemini 2.5 Flash..."):
         try:
-            # Using the correct 2.5 Flash model
             model = genai.GenerativeModel('gemini-2.5-flash')
             
             reader = PyPDF2.PdfReader(uploaded_file)
             raw_text = "".join([p.extract_text() for p in reader.pages])
             
+            # Updated Prompt: Original headers + Mandatory Summary + Bullet cues
             prompt = f"""
-            Reformat this resume into these EXACT sections: SUMMARY:, SKILLS:, EDUCATION:, LICENSED CPA:, WORK EXPERIENCE:.
-            - All headers must be in ALL CAPS.
-            - For Work Experience/Education, use the format: 'Company Name/Degree | Date Range'
-            - Ensure the Job Title is on the very next line.
-            - No numbers before headers.
+            Reformat this resume keeping ONLY its original sections, but change the headers to ALL CAPS and end them with a colon (e.g., EXPERIENCE:, EDUCATION:).
+            ALWAYS generate a 'SUMMARY:' section at the very beginning of the draft, summarizing the candidate, regardless of whether the original resume had one.
+            For Work Experience/Education, use the EXACT format on a single line: 'Company Name/Degree | Date Range'.
+            Ensure the Job Title is on the very next line below the Company.
+            For Skills, put each skill on a new line.
+            Do not put numbers before headers.
             TEXT: {raw_text}
             """
             response = model.generate_content(prompt)
@@ -53,6 +54,9 @@ if uploaded_file and st.button("Generate AI Draft"):
 
 if st.session_state.edited_content:
     st.session_state.edited_content = st.text_area("Edit Window:", value=st.session_state.edited_content, height=450)
+    
+    # Checkbox to control Summary visibility in the final document
+    include_summary = st.checkbox("Include AI-Generated Summary in Final Resume", value=True)
 
     if st.button("Download Final Word Doc"):
         doc = docx.Document()
@@ -92,65 +96,83 @@ if st.session_state.edited_content:
         res_p.paragraph_format.space_after = Pt(12)
 
         # --- 4. CONTENT FORMATTING ---
-        headers = ["SUMMARY:", "SKILLS:", "EDUCATION:", "LICENSED CPA:", "WORK EXPERIENCE:"]
         current_section = ""
         last_line_was_company_date = False
+        skip_mode = False
 
         for line in st.session_state.edited_content.split('\n'):
             line = line.strip()
             if not line: continue
 
-            # Header Styling: BOLD, CAPS, 6pt before and 6pt after
-            if any(h in line.upper() for h in headers):
-                current_section = line.upper()
+            # Detect Headers dynamically (ALL CAPS ending with a colon)
+            if line.isupper() and line.endswith(":"):
+                current_section = line
+                
+                # Logic for the Checkbox: skip summary content if unchecked
+                if "SUMMARY" in line and not include_summary:
+                    skip_mode = True
+                    continue
+                else:
+                    skip_mode = False
+
                 p = doc.add_paragraph()
                 p.paragraph_format.space_before = Pt(6) 
                 p.paragraph_format.space_after = Pt(6)  
                 p.paragraph_format.keep_with_next = True
-                run = p.add_run(line.upper()) 
+                run = p.add_run(line) 
                 run.bold = True
                 run.font.size = Pt(12)
                 last_line_was_company_date = False
                 continue
-
-            # SKILLS: Keep exactly as they are without formatting changes
-            if "SKILLS:" in current_section:
-                doc.add_paragraph(line)
-            
-            # WORK/EDUCATION: Clean Tab Stop layout to perfect the spacing
-            elif "|" in line:
-                p_job = doc.add_paragraph()
-                # 12pt space directly applied to the paragraph matches the visual 
-                # gap (6pt + 6pt) created around the headers
-                p_job.paragraph_format.space_before = Pt(12)
-                p_job.paragraph_format.space_after = Pt(0)
                 
-                # Set right-aligned tab stop for the Date Range
-                tab_stops = p_job.paragraph_format.tab_stops
-                tab_stops.add_tab_stop(Inches(7.0), WD_TAB_ALIGNMENT.RIGHT)
+            if skip_mode:
+                continue
+
+            # SKILLS: Force native Word Bullet Points
+            if "SKILL" in current_section:
+                clean_line = line.lstrip("*-• ").strip()
+                if clean_line:
+                    p_skill = doc.add_paragraph(clean_line, style='List Bullet')
+                    p_skill.paragraph_format.space_after = Pt(2)
+                continue
+            
+            # WORK/EDUCATION: Fixed-width Table layout for perfect Date Alignment
+            elif "|" in line:
+                p_spacer = doc.add_paragraph()
+                p_spacer.paragraph_format.space_before = Pt(6)
+                
+                row_table = doc.add_table(rows=1, cols=2)
+                row_table.autofit = False
+                
+                # Lock column widths (Left: 5.5 inches, Right: 1.5 inches)
+                # This ensures the date ALWAYS starts at the exact same point
+                cell_left = row_table.rows[0].cells[0]
+                cell_right = row_table.rows[0].cells[1]
+                cell_left.width = Inches(5.5)
+                cell_right.width = Inches(1.5)
                 
                 parts = line.split("|")
                 
-                # Left Side: Company/Degree (BOLD & CAPS)
-                run_comp = p_job.add_run(parts[0].strip().upper())
+                # Left: Company/Degree (BOLD & CAPS)
+                run_comp = cell_left.paragraphs[0].add_run(parts[0].strip().upper())
                 run_comp.bold = True
                 
-                # Insert the Tab
-                p_job.add_run("\t")
-                
-                # Right Side: Date Range (BOLD & ITALIC)
-                run_date = p_job.add_run(parts[1].strip())
+                # Right: Date Range (BOLD, ITALIC, Smaller font)
+                p_d = cell_right.paragraphs[0]
+                p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                run_date = p_d.add_run(parts[1].strip())
                 run_date.bold = True
                 run_date.italic = True
+                run_date.font.size = Pt(10) # Shrunk back to before size
                 
                 last_line_was_company_date = True 
             
             else:
                 p_body = doc.add_paragraph()
-                # Job Title: BOLD & CAPS immediately following the Company/Date
-                if last_line_was_company_date and "WORK EXPERIENCE:" in current_section:
-                    run_job = p_body.add_run(line.upper()) 
-                    run_job.bold = True
+                # Job Title logic following the Company line
+                if last_line_was_company_date:
+                    run_job = p_body.add_run(line.title()) # Title Case (Small letters)
+                    run_job.bold = False                   # Explicitly unbolded
                     last_line_was_company_date = False
                 else:
                     p_body.add_run(line)
