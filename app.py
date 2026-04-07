@@ -1,7 +1,7 @@
 import streamlit as st
 import PyPDF2
 import docx
-from docx.shared import Inches, Pt, RGBColor  # Added/Verified RGBColor here
+from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 import google.generativeai as genai
@@ -11,7 +11,7 @@ import os
 st.set_page_config(page_title="Executive Resume Builder", layout="wide")
 
 # --- AI Configuration ---
-# Use Gemini 1.5 Flash (Standard) or Pro if you have a paid subscription
+# Ensure GEMINI_API_KEY is added to your Streamlit Secrets
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 model = genai.GenerativeModel('gemini-1.5-flash')
 
@@ -54,7 +54,7 @@ if st.session_state.edited_content:
         
         # --- 1. PAGE MARGINS ---
         section = doc.sections[0]
-        section.top_margin = Inches(0.5) 
+        section.top_margin = Inches(0.4) 
         section.bottom_margin = Inches(0.5)
         section.left_margin = Inches(0.75)
         section.right_margin = Inches(0.75)
@@ -96,7 +96,7 @@ if st.session_state.edited_content:
             line = line.strip()
             if not line: continue
 
-            # Header Styling
+            # Header Styling: BOLD, CAPS, 6pt (0.5 line) space
             if any(h in line.upper() for h in headers):
                 current_section = line.upper()
                 p = doc.add_paragraph()
@@ -109,12 +109,13 @@ if st.session_state.edited_content:
                 last_line_was_table = False
                 continue
 
-            # SKILLS EXCEPTION
+            # SKILLS EXCEPTION: Keep as is
             if "SKILLS:" in current_section:
                 doc.add_paragraph(line)
             
             # WORK/EDUCATION: Table layout
             elif "|" in line:
+                # Spacing between entries (6pt to match headers)
                 p_spacer = doc.add_paragraph()
                 p_spacer.paragraph_format.space_before = Pt(6)
                 
@@ -122,5 +123,44 @@ if st.session_state.edited_content:
                 row_table.width = Inches(7.0)
                 parts = line.split("|")
                 
-                # Company/Degree
-                row_table.rows[0].cells[0].paragraphs[0].add_run(parts[0].strip().
+                # Left: Company/Degree (BOLD & CAPS)
+                row_table.rows[0].cells[0].paragraphs[0].add_run(parts[0].strip().upper()).bold = True
+                
+                # Right: Date Range (BOLD & ITALIC)
+                p_d = row_table.rows[0].cells[1].paragraphs[0]
+                p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                run_date = p_d.add_run(parts[1].strip())
+                run_date.bold = True
+                run_date.italic = True
+                
+                last_line_was_table = True 
+            
+            else:
+                p_body = doc.add_paragraph()
+                # Job Title (BOLD & CAPS)
+                if last_line_was_table and "WORK EXPERIENCE:" in current_section:
+                    run_job = p_body.add_run(line.upper()) 
+                    run_job.bold = True
+                    last_line_was_table = False
+                else:
+                    p_body.add_run(line)
+                p_body.paragraph_format.space_after = Pt(2)
+
+        # --- 5. BOTTOM FOOTER ---
+        doc.add_paragraph()
+        p_foot = doc.add_paragraph()
+        p_foot.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        f_text = p_foot.add_run(f"If you would like to interview this candidate, please call {contact_number}")
+        f_text.bold = True
+        f_text.font.color.rgb = RGBColor(0, 51, 153)
+
+        # Finalize and Save
+        buf = io.BytesIO()
+        doc.save(buf)
+        st.success("Resume Polished and Formatted!")
+        st.download_button(
+            label="Download Final Word Document",
+            data=buf.getvalue(),
+            file_name=f"Formatted_Resume_{company_choice}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
