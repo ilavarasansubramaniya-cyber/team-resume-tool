@@ -6,84 +6,58 @@ import google.generativeai as genai
 
 st.set_page_config(page_title="Resume Formatter", page_icon="📄")
 st.title("📄 One-Click Resume Formatter")
-st.write("Upload a PDF to instantly format it into a professional Word document.")
 
-# API Setup with multiple fallback models
-try:
-    api_key = st.secrets["GEMINI_API_KEY"]
-    genai.configure(api_key=api_key)
-    
-    # We list potential models to try in order of reliability
-    model_names = ['gemini-1.5-flash-latest', 'gemini-1.5-pro-latest', 'gemini-pro']
-    
-    # Try to find which one your key supports
-    model = None
-    for name in model_names:
-        try:
-            temp_model = genai.GenerativeModel(name)
-            # Test it briefly
-            temp_model.generate_content("test", generation_config={"max_output_tokens": 1})
-            model = temp_model
-            break 
-        except:
-            continue
-
-    if not model:
-        st.error("Could not connect to any Gemini models. Please check your API key at aistudio.google.com")
-        st.stop()
-
-except Exception as e:
-    st.error("API Key Missing: Add GEMINI_API_KEY to your Streamlit Secrets.")
+# API Setup
+if "GEMINI_API_KEY" not in st.secrets:
+    st.error("Please add your API key to Streamlit Secrets.")
     st.stop()
+
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+
+# Simplified model selection
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 uploaded_file = st.file_uploader("Upload Before Resume (PDF)", type="pdf")
 
 if uploaded_file is not None:
     if st.button("Format My Resume"):
-        with st.spinner("Re-writing resume..."):
+        with st.spinner("Processing..."):
             try:
-                pdf_reader = PyPDF2.PdfReader(uploaded_file)
+                # 1. Get Text
+                reader = PyPDF2.PdfReader(uploaded_file)
                 raw_text = ""
-                for page in pdf_reader.pages:
+                for page in reader.pages:
                     raw_text += page.extract_text() or ""
 
-                # Prompt designed to match your 'After' document exactly
+                # 2. Format with AI
+                # This prompt is tuned to your 'After' document [cite: 95-118]
                 prompt = f"""
-                Reformat the following resume text. 
-                Use these exact headers in this order:
-                1. Name (Just the name)
-                2. Summary: (Professional paragraph)
-                3. Skills: (List of core competencies)
-                4. Education: (Degree, Date, and Institution)
-                5. Licensed CPA: (License details)
-                6. Work Experience: (Company, Title, Date range, and Bullet Points)
-
-                Remove all page numbers or 'Source' tags. 
-                Make it clean and professional.
+                Reformat this resume into these exact sections:
+                Summary, Skills, Education, Licensed CPA, and Work Experience.
+                Use a professional tone. Remove any page numbers or 'Source' labels.
                 
-                RESUME DATA:
+                RESUME TEXT:
                 {raw_text}
                 """
                 
                 response = model.generate_content(prompt)
                 
-                if response.text:
-                    doc = docx.Document()
-                    # Clean up markdown stars
-                    text = response.text.replace('**', '').replace('__', '')
-                    
-                    for line in text.split('\n'):
-                        doc.add_paragraph(line)
-                    
-                    bio = io.BytesIO()
-                    doc.save(bio)
-                    
-                    st.success("Formatting Complete!")
-                    st.download_button(
-                        label="Download Word Document",
-                        data=bio.getvalue(),
-                        file_name="Formatted_Resume.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
+                # 3. Build Word File
+                doc = docx.Document()
+                clean_text = response.text.replace('**', '') # Clean bold markers
+                
+                for line in clean_text.split('\n'):
+                    doc.add_paragraph(line)
+                
+                output = io.BytesIO()
+                doc.save(output)
+                
+                st.success("Ready for download!")
+                st.download_button(
+                    label="Download Formatted Resume (.docx)",
+                    data=output.getvalue(),
+                    file_name="Formatted_Resume.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"Something went wrong: {e}")
