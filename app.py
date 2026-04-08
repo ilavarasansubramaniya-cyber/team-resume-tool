@@ -6,16 +6,18 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 import google.generativeai as genai
 import os
+from PIL import Image # NEW: Added for handling Image uploads
 
 # --- Page Setup ---
-st.set_page_config(page_title="Executive Resume Builder", layout="wide")
+st.set_page_config(page_title="Professional Resume Formatter", layout="wide")
 
 # --- AI Configuration ---
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 # Sidebar for company and contact info
 st.sidebar.title("🏢 Branding & ID")
-company_choice = st.sidebar.selectbox("Select Sister Company", ["W3G", "Synectics", "ProTouch"])
+# UPDATED: Changed from "Select Sister Company" to "Select Company"
+company_choice = st.sidebar.selectbox("Select Company", ["W3G", "Synectics", "ProTouch"])
 contact_number = st.sidebar.text_input("Enter Contact Number", value="123-456-7890")
 
 logo_map = {"W3G": "w3g.png", "Synectics": "synectics.jpg", "ProTouch": "protouch.png"}
@@ -24,22 +26,21 @@ logo_map = {"W3G": "w3g.png", "Synectics": "synectics.jpg", "ProTouch": "protouc
 UNIFORM_SPACE = Pt(10) 
 
 # --- Main App Interface ---
-st.title("📄 Professional Resume Builder")
+# UPDATED: Changed Title
+st.title("📄 Professional Resume Formatter")
 
 if 'edited_content' not in st.session_state:
     st.session_state.edited_content = ""
 
-uploaded_file = st.file_uploader("Upload PDF Resume", type="pdf")
+# UPDATED: Accept PDF, DOCX, and Images
+uploaded_file = st.file_uploader("Upload Resume", type=["pdf", "docx", "png", "jpg", "jpeg"])
 
 if uploaded_file and st.button("Generate AI Draft"):
     with st.spinner("Analyzing and formatting with Gemini 2.5 Flash..."):
         try:
             model = genai.GenerativeModel('gemini-2.5-flash')
-            reader = PyPDF2.PdfReader(uploaded_file)
-            raw_text = "".join([p.extract_text() for p in reader.pages])
             
-            # UPDATED PROMPT: Strict rules on the "|" symbol to group job titles
-            prompt = f"""
+            prompt = """
             Reformat this resume keeping ONLY its original sections, but change the headers to ALL CAPS and end them with a colon.
             ALWAYS generate a 'SUMMARY:' section at the very beginning.
             For Work Experience/Education, use: 'Company Name/Degree | Date Range'.
@@ -47,10 +48,33 @@ if uploaded_file and st.button("Generate AI Draft"):
             CRITICAL RULE: ONLY use the '|' symbol to separate the Company/Degree and the Date. DO NOT use '|' anywhere else. If there are multiple job titles (e.g. 'Manager | Lead'), combine them with a hyphen (e.g. 'Manager - Lead') so it is read as one single job title.
             For Skills, Tools, Technical Tools, and Certifications, put each item on a new line.
             Do not put numbers before headers.
-            TEXT: {raw_text}
             """
-            response = model.generate_content(prompt)
-            st.session_state.edited_content = response.text.replace("**", "")
+            
+            # --- NEW: Logic to handle different file types ---
+            input_data = None
+            
+            if uploaded_file.type == "application/pdf":
+                reader = PyPDF2.PdfReader(uploaded_file)
+                raw_text = "".join([p.extract_text() for p in reader.pages])
+                input_data = prompt + f"\nTEXT:\n{raw_text}"
+                
+            elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                # Handle Word Docs
+                doc_file = docx.Document(uploaded_file)
+                raw_text = "\n".join([para.text for para in doc_file.paragraphs])
+                input_data = prompt + f"\nTEXT:\n{raw_text}"
+                
+            elif uploaded_file.type in ["image/png", "image/jpeg", "image/jpg"]:
+                # Handle Images using Gemini's native vision capabilities
+                img = Image.open(uploaded_file)
+                input_data = [prompt, img]
+            
+            if input_data:
+                response = model.generate_content(input_data)
+                st.session_state.edited_content = response.text.replace("**", "")
+            else:
+                st.error("Unsupported file type.")
+                
         except Exception as e:
             st.error(f"AI Error: {e}")
 
@@ -143,7 +167,6 @@ if st.session_state.edited_content:
                 p_d = cell_right.paragraphs[0]
                 p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 p_d.paragraph_format.space_after = UNIFORM_SPACE
-                # Re-join in case the date actually had a split artifact, though the AI prompt prevents it
                 date_text = parts[-1].strip() 
                 run_date = p_d.add_run(date_text)
                 run_date.bold, run_date.italic, run_date.font.size = True, True, Pt(10)
