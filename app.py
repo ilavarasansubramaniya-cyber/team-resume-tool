@@ -17,12 +17,14 @@ try:
 except Exception:
     st.error("API Key not found. Please set GEMINI_API_KEY in Streamlit Secrets.")
 
-# Sidebar for company and contact info
+# --- Sidebar: Branding & Title Settings ---
 st.sidebar.title("🏢 Branding & ID")
 company_choice = st.sidebar.selectbox("Select Company", ["W3G", "Synectics", "ProTouch"])
 contact_number = st.sidebar.text_input("Enter Contact Number", value="123-456-7890")
 
-# Template Mapping
+# NEW: Document Title Input (Defaults to RESUME, but can be a name)
+document_title = st.sidebar.text_input("Document Title (Middle Header)", value="RESUME")
+
 template_map = {
     "W3G": "w3g_template.docx",
     "Synectics": "synectics_template.docx",
@@ -30,19 +32,13 @@ template_map = {
 }
 
 # --- GLOBAL SETTINGS ---
-UNIFORM_SPACE = Pt(10) # Used for sections and between entries
+UNIFORM_SPACE = Pt(10)
 
-# --- Helper Function: Set Font to Arial ---
 def set_arial_font(doc):
     style = doc.styles['Normal']
     font = style.font
     font.name = 'Arial'
     font.size = Pt(11)
-    for section in doc.sections:
-        for footer in [section.footer, section.header]:
-            for paragraph in footer.paragraphs:
-                for run in paragraph.runs:
-                    run.font.name = 'Arial'
 
 # --- Main App Interface ---
 st.title("📄 Professional Resume Formatter")
@@ -53,7 +49,7 @@ if 'edited_content' not in st.session_state:
 uploaded_file = st.file_uploader("Upload Resume", type=["pdf", "docx", "png", "jpg", "jpeg"])
 
 if uploaded_file and st.button("Generate AI Draft"):
-    with st.spinner("Analyzing and formatting with Gemini..."):
+    with st.spinner("Analyzing and formatting..."):
         try:
             model = genai.GenerativeModel('gemini-2.5-flash')
             prompt = """
@@ -90,7 +86,7 @@ if st.session_state.edited_content:
     st.session_state.edited_content = st.text_area("Edit Window:", value=st.session_state.edited_content, height=450)
     include_summary = st.checkbox("Include AI Summary", value=True)
 
-    # Prepare the Word Document in memory whenever the text is updated
+    # Prepare Document
     t_file = template_map.get(company_choice)
     base_dir = os.path.dirname(os.path.abspath(__file__))
     template_path = os.path.join(base_dir, t_file)
@@ -98,6 +94,24 @@ if st.session_state.edited_content:
     doc = docx.Document(template_path) if os.path.exists(template_path) else docx.Document()
     set_arial_font(doc)
 
+    # --- 1. Top Right Contact Info (Syncs with Sidebar) ---
+    # We add this to the top of the doc. If your template has a header, 
+    # this will appear at the start of the body text.
+    p_top_contact = doc.add_paragraph()
+    p_top_contact.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    # Use the variable directly from the sidebar input
+    contact_run = p_top_contact.add_run(f"If you would like to interview this\ncandidate, please call {contact_number}")
+    contact_run.bold, contact_run.font.name, contact_run.font.size = True, 'Arial', Pt(11)
+
+    # --- 2. Dynamic Title (RESUME or Candidate Name) ---
+    p_title = doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Use the "Document Title" variable from sidebar
+    title_run = p_title.add_run(document_title.upper())
+    title_run.bold, title_run.font.name, title_run.font.size = True, 'Arial', Pt(16)
+    p_title.paragraph_format.space_after = UNIFORM_SPACE
+
+    # --- 3. Body Content Formatting ---
     current_section = ""
     last_line_was_company = False
     skip_mode = False
@@ -107,7 +121,6 @@ if st.session_state.edited_content:
         line = line.strip()
         if not line: continue
 
-        # Section Headers
         if line.isupper() and line.endswith(":"):
             current_section = line
             if "SUMMARY" in line and not include_summary:
@@ -123,16 +136,14 @@ if st.session_state.edited_content:
             
         if skip_mode: continue
 
-        # Manual Bullets (Arial)
         if any(bh in current_section for bh in bullet_headers):
             p_bullet = doc.add_paragraph(f"• {line.lstrip('*-• ')}")
             p_bullet.paragraph_format.left_indent = Inches(0.25)
             for run in p_bullet.runs: run.font.name = 'Arial'
             continue
         
-        # Experience/Education Entry (Company | Date)
         elif "|" in line:
-            # Space before the entry (same as section spacing)
+            # Entry Spacing (Same as Section Spacing)
             spacer_p = doc.add_paragraph()
             spacer_p.paragraph_format.space_before = UNIFORM_SPACE
             
@@ -152,14 +163,12 @@ if st.session_state.edited_content:
             run_date.italic, run_date.font.name, run_date.font.size = True, 'Arial', Pt(10)
             last_line_was_company = True 
         
-        # Job Title / Body Text
         else:
             p_body = doc.add_paragraph()
             if last_line_was_company:
                 run_job = p_body.add_run(line.title())
-                run_job.bold = False # Job Title not bold
-                run_job.font.name = 'Arial'
-                # Space AFTER Job Title before description starts
+                run_job.bold, run_job.font.name = False, 'Arial'
+                # Space between Job Title and Description
                 p_body.paragraph_format.space_after = Pt(8) 
                 last_line_was_company = False
             else:
@@ -167,11 +176,10 @@ if st.session_state.edited_content:
                 run_text.font.name = 'Arial'
                 p_body.paragraph_format.space_after = Pt(4)
 
-    # Save to buffer for the download button
+    # Save to buffer
     buf = io.BytesIO()
     doc.save(buf)
 
-    # THE SINGLE DOWNLOAD BUTTON
     st.download_button(
         label=f"📥 Download Final {company_choice} Resume",
         data=buf.getvalue(),
