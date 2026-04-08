@@ -43,14 +43,17 @@ if uploaded_file and st.button("Generate AI Draft"):
     with st.spinner("Gemini AI is analyzing..."):
         try:
             model = genai.GenerativeModel('gemini-2.5-flash')
+            # Updated Prompt to strictly enforce Summary and Job Title placement
             prompt = """
-            Reformat this resume keeping ONLY its original sections, but change the headers to ALL CAPS and end them with a colon.
-            ALWAYS generate a 'SUMMARY:' section at the very beginning.
-            For Work Experience/Education, use: 'Company Name/Degree | Date Range'.
-            Ensure the Job Title/Role is on the very next line below the Company.
-            CRITICAL RULE: ONLY use the '|' symbol to separate the Company/Degree and the Date.
-            For Skills, Tools, Technical Tools, and Certifications, put each item on a new line.
-            Do not put numbers before headers.
+            Reformat this resume keeping ONLY its original sections. 
+            Change all section headers to ALL CAPS and end them with a colon (e.g., SUMMARY:, EXPERIENCE:).
+            
+            1. MANDATORY: Generate a 'SUMMARY:' section at the very top based on the resume.
+            2. For Work Experience/Education: Use the format 'Company Name/University | Date Range' on the first line.
+            3. CRITICAL: Place the 'Job Title/Degree Name' on the very next line immediately below the Company line.
+            4. Only use the '|' symbol to separate Company and Date. DO NOT use it for job titles.
+            5. For Skills, Tools, and Certifications, put each item on a separate new line.
+            6. Do not include any bolding (**) or special characters like # in your output.
             """
 
             input_data = None
@@ -81,40 +84,64 @@ if st.session_state.edited_content:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         template_path = os.path.join(base_dir, t_file)
 
+        # Load the template or fallback to empty doc
         doc = docx.Document(template_path) if os.path.exists(template_path) else docx.Document()
 
         current_section = ""
-        bullet_headers = ["SKILL", "TOOL", "CERTIFICATION", "TECHNICAL"]
-
-        for line in st.session_state.edited_content.split('\n'):
+        bullet_headers = ["SKILL", "TOOL", "CERTIFICATION", "TECHNICAL", "PROJECT"]
+        
+        lines = st.session_state.edited_content.split('\n')
+        
+        for i, line in enumerate(lines):
             line = line.strip()
             if not line: continue
 
+            # Handle Section Headers
             if line.isupper() and line.endswith(":"):
                 current_section = line
                 p = doc.add_paragraph()
                 p.paragraph_format.space_before = UNIFORM_SPACE
                 run = p.add_run(line)
-                run.bold, run.font.size = True, Pt(12)
+                run.bold = True
+                run.font.size = Pt(12)
                 continue
 
+            # Handle Bulleted Sections
             if any(bh in current_section for bh in bullet_headers):
                 p_b = doc.add_paragraph(f"• {line.lstrip('*-• ')}")
                 p_b.paragraph_format.left_indent = Inches(0.25)
+                p_b.paragraph_format.space_after = Pt(2)
+            
+            # Handle Experience (Company | Date)
             elif "|" in line:
                 parts = line.split("|")
                 p = doc.add_paragraph()
-                p.add_run(parts[0].strip().upper()).bold = True
+                p.paragraph_format.space_before = Pt(6)
+                # Company Name
+                run_c = p.add_run(parts[0].strip().upper())
+                run_c.bold = True
+                # Date (Tabbed to right)
                 run_d = p.add_run(f"\t{parts[1].strip()}")
-                run_d.italic, run_d.font.size = True, Pt(10)
+                run_d.italic = True
+                run_d.font.size = Pt(10)
+                
+                # Check next line for Job Title and format it bold
+                if i + 1 < len(lines) and lines[i+1].strip() and not lines[i+1].endswith(":"):
+                    next_line = lines[i+1].strip()
+                    p_title = doc.add_paragraph()
+                    run_t = p_title.add_run(next_line)
+                    run_t.bold = True
+                    # We will skip the next iteration since we handled it here
+                    lines[i+1] = "" 
+            
             else:
-                doc.add_paragraph(line)
+                doc.add_paragraph(line).paragraph_format.space_after = Pt(4)
 
-        # --- THE FOOTER (Check syntax here) ---
+        # Blue Footer for Contact
         p_foot = doc.add_paragraph()
         p_foot.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        # This line below was likely the cause of the SyntaxError:
-        f_run = p_foot.add_run(f"\nIf you would like to interview this candidate, please call {contact_number}")
+        footer_text = f"\nIf you would like to interview this candidate, please call {contact_number}"
+        f_run = p_foot.add_run(footer_text)
         f_run.bold = True
         f_run.font.color.rgb = RGBColor(0, 51, 153)
 
