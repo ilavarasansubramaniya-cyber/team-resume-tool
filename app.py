@@ -34,16 +34,17 @@ uploaded_file = st.file_uploader("Upload PDF Resume", type="pdf")
 if uploaded_file and st.button("Generate AI Draft"):
     with st.spinner("Analyzing and formatting with Gemini 2.5 Flash..."):
         try:
-            # Note: Using the model identifier you specified
             model = genai.GenerativeModel('gemini-2.5-flash')
             reader = PyPDF2.PdfReader(uploaded_file)
             raw_text = "".join([p.extract_text() for p in reader.pages])
             
+            # UPDATED PROMPT: Strict rules on the "|" symbol to group job titles
             prompt = f"""
             Reformat this resume keeping ONLY its original sections, but change the headers to ALL CAPS and end them with a colon.
             ALWAYS generate a 'SUMMARY:' section at the very beginning.
             For Work Experience/Education, use: 'Company Name/Degree | Date Range'.
             Ensure the Job Title/Role is on the very next line below the Company.
+            CRITICAL RULE: ONLY use the '|' symbol to separate the Company/Degree and the Date. DO NOT use '|' anywhere else. If there are multiple job titles (e.g. 'Manager | Lead'), combine them with a hyphen (e.g. 'Manager - Lead') so it is read as one single job title.
             For Skills, Tools, Technical Tools, and Certifications, put each item on a new line.
             Do not put numbers before headers.
             TEXT: {raw_text}
@@ -142,7 +143,9 @@ if st.session_state.edited_content:
                 p_d = cell_right.paragraphs[0]
                 p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 p_d.paragraph_format.space_after = UNIFORM_SPACE
-                run_date = p_d.add_run(parts[1].strip())
+                # Re-join in case the date actually had a split artifact, though the AI prompt prevents it
+                date_text = parts[-1].strip() 
+                run_date = p_d.add_run(date_text)
                 run_date.bold, run_date.italic, run_date.font.size = True, True, Pt(10)
                 last_line_was_company = True 
             
@@ -165,7 +168,7 @@ if st.session_state.edited_content:
 
         buf = io.BytesIO()
         doc.save(buf)
-        st.success("Bullets added and spacing normalized!")
+        st.success("Formatting normalized!")
         st.download_button(
             label="Download Final Word Document",
             data=buf.getvalue(),
