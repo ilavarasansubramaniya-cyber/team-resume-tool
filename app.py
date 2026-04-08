@@ -21,7 +21,6 @@ contact_number = st.sidebar.text_input("Enter Contact Number", value="123-456-78
 logo_map = {"W3G": "w3g.png", "Synectics": "synectics.jpg", "ProTouch": "protouch.png"}
 
 # --- GLOBAL UNIFORM SPACING ---
-# This ensures the gap between Summary and Skills is identical to all other gaps
 UNIFORM_SPACE = Pt(10) 
 
 # --- Main App Interface ---
@@ -35,23 +34,24 @@ uploaded_file = st.file_uploader("Upload PDF Resume", type="pdf")
 if uploaded_file and st.button("Generate AI Draft"):
     with st.spinner("Analyzing and formatting with Gemini 2.5 Flash..."):
         try:
+            # Note: Using the model identifier you specified
             model = genai.GenerativeModel('gemini-2.5-flash')
             reader = PyPDF2.PdfReader(uploaded_file)
             raw_text = "".join([p.extract_text() for p in reader.pages])
             
             prompt = f"""
-            Reformat this resume keeping ONLY its original sections, but change the headers to ALL CAPS and end them with a colon (e.g., EXPERIENCE:, EDUCATION:).
+            Reformat this resume keeping ONLY its original sections, but change the headers to ALL CAPS and end them with a colon.
             ALWAYS generate a 'SUMMARY:' section at the very beginning.
-            For Work Experience/Education, use the EXACT format on a single line: 'Company Name/Degree | Date Range'.
+            For Work Experience/Education, use: 'Company Name/Degree | Date Range'.
             Ensure the Job Title/Role is on the very next line below the Company.
-            For Skills, put each skill on a new line.
+            For Skills, Tools, Technical Tools, and Certifications, put each item on a new line.
             Do not put numbers before headers.
             TEXT: {raw_text}
             """
             response = model.generate_content(prompt)
             st.session_state.edited_content = response.text.replace("**", "")
         except Exception as e:
-            st.error(f"AI Connection Error: {e}")
+            st.error(f"AI Error: {e}")
 
 if st.session_state.edited_content:
     st.session_state.edited_content = st.text_area("Edit Window:", value=st.session_state.edited_content, height=450)
@@ -81,7 +81,7 @@ if st.session_state.edited_content:
         run_c = p_contact.add_run(f"If you would like to interview this\ncandidate, please call {contact_number}")
         run_c.font.size, run_c.bold = Pt(11), True
 
-        # --- 3. CENTERED "RESUME" TITLE ---
+        # --- 3. TITLE ---
         res_p = doc.add_paragraph()
         res_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         res_run = res_p.add_run("RESUME")
@@ -93,12 +93,14 @@ if st.session_state.edited_content:
         current_section = ""
         last_line_was_company = False
         skip_mode = False
+        
+        # Define headers that should have bulleted lists
+        bullet_headers = ["SKILL", "TOOL", "CERTIFICATION", "TECHNICAL"]
 
         for line in st.session_state.edited_content.split('\n'):
             line = line.strip()
             if not line: continue
 
-            # Header Detection (e.g., SUMMARY:, SKILLS:, EXPERIENCE:)
             if line.isupper() and line.endswith(":"):
                 current_section = line
                 if "SUMMARY" in line and not include_summary:
@@ -108,7 +110,7 @@ if st.session_state.edited_content:
                     skip_mode = False
 
                 p = doc.add_paragraph()
-                p.paragraph_format.space_after = UNIFORM_SPACE # Gap below header
+                p.paragraph_format.space_after = UNIFORM_SPACE
                 run = p.add_run(line) 
                 run.bold, run.font.size = True, Pt(12)
                 last_line_was_company = False
@@ -116,54 +118,45 @@ if st.session_state.edited_content:
                 
             if skip_mode: continue
 
-            # SKILLS Section
-            if "SKILL" in current_section:
+            # Bulleting Logic for Skills, Tools, and Certifications
+            if any(bh in current_section for bh in bullet_headers):
                 clean_line = line.lstrip("*-• ").strip()
                 if clean_line:
-                    p_skill = doc.add_paragraph(clean_line, style='List Bullet')
-                    p_skill.paragraph_format.space_after = UNIFORM_SPACE # Gap between skills
+                    p_bullet = doc.add_paragraph(clean_line, style='List Bullet')
+                    p_bullet.paragraph_format.space_after = UNIFORM_SPACE
                 continue
             
-            # EXPERIENCE/EDUCATION Section (Company | Date)
+            # Experience/Education Table
             elif "|" in line:
                 row_table = doc.add_table(rows=1, cols=2)
                 row_table.autofit = False
-                
-                # Column Widths: Left (4.8") | Right (2.2" for single-line dates)
                 cell_left, cell_right = row_table.rows[0].cells[0], row_table.rows[0].cells[1]
                 cell_left.width, cell_right.width = Inches(4.8), Inches(2.2)
                 
                 parts = line.split("|")
-                
-                # Left Side: Company Name
                 p_l = cell_left.paragraphs[0]
-                p_l.paragraph_format.space_after = UNIFORM_SPACE # Gap below Company
+                p_l.paragraph_format.space_after = UNIFORM_SPACE
                 run_comp = p_l.add_run(parts[0].strip().upper())
                 run_comp.bold = True
                 
-                # Right Side: Date Range
                 p_d = cell_right.paragraphs[0]
                 p_d.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 p_d.paragraph_format.space_after = UNIFORM_SPACE
                 run_date = p_d.add_run(parts[1].strip())
                 run_date.bold, run_date.italic, run_date.font.size = True, True, Pt(10)
-                
                 last_line_was_company = True 
             
-            # Role / University / Body Text
             else:
                 p_body = doc.add_paragraph()
-                p_body.paragraph_format.space_after = UNIFORM_SPACE # Gap after role/text
-                
+                p_body.paragraph_format.space_after = UNIFORM_SPACE
                 if last_line_was_company:
-                    # Job Title/University: Title Case, Unbolded
                     run_job = p_body.add_run(line.title())
                     run_job.bold = False
                     last_line_was_company = False
                 else:
                     p_body.add_run(line)
 
-        # --- 5. BOTTOM FOOTER ---
+        # --- 5. FOOTER ---
         doc.add_paragraph()
         p_foot = doc.add_paragraph()
         p_foot.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -172,7 +165,7 @@ if st.session_state.edited_content:
 
         buf = io.BytesIO()
         doc.save(buf)
-        st.success("Uniform Spacing Applied!")
+        st.success("Bullets added and spacing normalized!")
         st.download_button(
             label="Download Final Word Document",
             data=buf.getvalue(),
