@@ -254,35 +254,72 @@ def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
     return tbl
 
 
-def add_education_row(doc, degree_part: str, date_part: str):
+def add_education_row(doc, degree_part: str, date_part: str, institution: str = ""):
     """
-    Render  Degree (bold, left)  |  Date (italic, right-aligned)
-    Same fixed column widths as experience rows so ALL dates line up.
+    2-row × 2-column table — mirrors the experience layout exactly:
+      Row 1:  Degree (bold, left)        |  Date (italic, right-aligned)
+      Row 2:  Institution (unbold, left)  |  [empty — keeps column fixed]
+
+    Same fixed column widths as experience so ALL dates align.
     Col widths: 5.5" (content) + 1.5" (date) = 7"
     """
     DATE_COL    = Inches(1.5)
     CONTENT_COL = Inches(5.5)
 
-    tbl = doc.add_table(rows=1, cols=2)
+    rows = 2 if institution else 1
+    tbl = doc.add_table(rows=rows, cols=2)
     tbl.autofit = False
-    cl, cr = tbl.rows[0].cells
 
-    cl.width = CONTENT_COL
-    cr.width = DATE_COL
+    r0c0, r0c1 = tbl.rows[0].cells
+    for cell, w in [(r0c0, CONTENT_COL), (r0c1, DATE_COL)]:
+        cell.width = w
 
-    # Degree — bold, sentence case
-    _base_run(cl.paragraphs[0], sentence_case(degree_part.strip()), bold=True)
+    # Row 1 left — Degree bold, sentence case
+    _base_run(r0c0.paragraphs[0], sentence_case(degree_part.strip()), bold=True)
+    r0c0.paragraphs[0].paragraph_format.space_before = Pt(SP)
+    r0c0.paragraphs[0].paragraph_format.space_after  = Pt(2)
 
-    # Date — italic, right-aligned
-    cr.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    _base_run(cr.paragraphs[0], date_part.strip(), italic=True)
+    # Row 1 right — Date italic, right-aligned
+    r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
+    r0c1.paragraphs[0].paragraph_format.space_before = Pt(SP)
+    r0c1.paragraphs[0].paragraph_format.space_after  = Pt(2)
 
-    cl.paragraphs[0].paragraph_format.space_before = Pt(SP)
-    cr.paragraphs[0].paragraph_format.space_before = Pt(SP)
-    cl.paragraphs[0].paragraph_format.space_after  = Pt(SP)
-    cr.paragraphs[0].paragraph_format.space_after  = Pt(SP)
+    if institution:
+        r1c0, r1c1 = tbl.rows[1].cells
+        for cell, w in [(r1c0, CONTENT_COL), (r1c1, DATE_COL)]:
+            cell.width = w
+
+        # Row 2 left — Institution unbold, sentence case
+        _base_run(r1c0.paragraphs[0], sentence_case(institution.strip()), bold=False)
+        r1c0.paragraphs[0].paragraph_format.space_before = Pt(0)
+        r1c0.paragraphs[0].paragraph_format.space_after  = Pt(SP)
+
+        # Row 2 right — empty
+        r1c1.paragraphs[0].text = ""
+        r1c1.paragraphs[0].paragraph_format.space_before = Pt(0)
+        r1c1.paragraphs[0].paragraph_format.space_after  = Pt(SP)
 
     return tbl
+
+
+def set_keep_with_next(paragraph):
+    """
+    Set keepWithNext on a paragraph via XML so Word moves the whole
+    block to the next page if it would otherwise start on the last line.
+    """
+    pPr = paragraph._element.get_or_add_pPr()
+    kwn = OxmlElement("w:keepWithNext")
+    pPr.append(kwn)
+
+
+def set_keep_together(paragraph):
+    """
+    Set keepLines on a paragraph so its lines are never split across pages.
+    """
+    pPr = paragraph._element.get_or_add_pPr()
+    kl = OxmlElement("w:keepLines")
+    pPr.append(kl)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -406,6 +443,7 @@ if st.session_state.original_ai_output:
             hp.paragraph_format.space_before   = Pt(SP)
             hp.paragraph_format.space_after    = Pt(SP)
             hp.paragraph_format.keep_with_next = True
+            set_keep_with_next(hp)   # XML-level keep — pushes to next page if on last line
             _base_run(hp, h, bold=True, size_pt=11)
 
             # ── Section Content ───────────────────────────────────────────────
@@ -432,7 +470,9 @@ if st.session_state.original_ai_output:
                 # ════════════════════════════════════════════════════════════
                 # EXPERIENCE
                 #   Company | Date  +  next line = Job Title
-                #   → rendered as a single 3-column row (same line)
+                #   → 2-row table: row1=company+date, row2=job title
+                #   keep_with_next on the paragraph before the table so
+                #   Word never orphans company name on the last line of a page
                 # ════════════════════════════════════════════════════════════
                 elif is_exp:
                     if "|" in line:
@@ -444,6 +484,12 @@ if st.session_state.original_ai_output:
                         if i + 1 < len(lines) and "|" not in lines[i + 1]:
                             job_title = lines[i + 1]
                             i += 1   # consume the title line
+                        # Anchor paragraph — keep_with_next pushes whole block
+                        anchor = doc.add_paragraph()
+                        anchor.paragraph_format.space_before   = Pt(0)
+                        anchor.paragraph_format.space_after    = Pt(0)
+                        anchor.paragraph_format.keep_with_next = True
+                        set_keep_with_next(anchor)
                         add_experience_row(doc, company_str, date_str, job_title)
                     else:
                         # Job description bullet — sentence case, not bold
@@ -452,25 +498,30 @@ if st.session_state.original_ai_output:
 
                 # ════════════════════════════════════════════════════════════
                 # EDUCATION
-                #   Degree | Date  →  bold degree, italic date, same line
-                #   Next line = institution — unbold plain text
+                #   Degree | Date  →  bold degree + italic date  (row 1)
+                #   Institution    →  unbold, same line structure  (row 2)
+                #   Both rows in ONE table so degree and institution are
+                #   vertically aligned and never split across pages.
                 # ════════════════════════════════════════════════════════════
                 elif is_edu:
                     if "|" in line:
                         parts      = line.split("|")
                         degree_str = parts[0].strip()
                         date_str   = parts[-1].strip()
-                        add_education_row(doc, degree_str, date_str)
-                        # Institution line(s) follow: unbold, sentence case
-                        while i + 1 < len(lines) and "|" not in lines[i + 1]:
-                            i += 1
-                            inst_p = doc.add_paragraph()
-                            inst_p.paragraph_format.space_before = Pt(0)
-                            inst_p.paragraph_format.space_after  = Pt(SP)
-                            _base_run(inst_p, sentence_case(lines[i]),
-                                      bold=False)
+                        # Peek ahead for institution line
+                        institution = ""
+                        if i + 1 < len(lines) and "|" not in lines[i + 1]:
+                            institution = lines[i + 1]
+                            i += 1   # consume institution line
+                        # Anchor paragraph keeps whole block together
+                        anchor = doc.add_paragraph()
+                        anchor.paragraph_format.space_before   = Pt(0)
+                        anchor.paragraph_format.space_after    = Pt(0)
+                        anchor.paragraph_format.keep_with_next = True
+                        set_keep_with_next(anchor)
+                        add_education_row(doc, degree_str, date_str, institution)
                     else:
-                        # Any stray line in education → plain, sentence case
+                        # Stray line in education → plain, sentence case
                         p = doc.add_paragraph()
                         p.paragraph_format.space_after = Pt(SP)
                         _base_run(p, sentence_case(line), bold=False)
