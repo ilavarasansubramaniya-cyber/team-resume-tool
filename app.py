@@ -1,6 +1,4 @@
 import streamlit as st
-from streamlit_lottie import st_lottie
-import requests
 import PyPDF2
 import docx
 from docx.shared import Inches, Pt
@@ -10,21 +8,8 @@ import google.generativeai as genai
 import os
 from PIL import Image 
 
-# --- 1. Grand UI Config & Animations ---
+# --- 1. Grand UI Config (Animations Removed) ---
 st.set_page_config(page_title="ResumePro Elite", layout="wide", page_icon="💎")
-
-def load_lottieurl(url: str):
-    try:
-        r = requests.get(url, timeout=5)
-        if r.status_code != 200:
-            return None
-        return r.json()
-    except Exception:
-        return None
-
-# Load Animations with fallback logic
-lottie_ai = load_lottieurl("https://assets5.lottiefiles.com/packages/lf20_gssu2dkm.json")
-lottie_success = load_lottieurl("https://assets10.lottiefiles.com/packages/lf20_xl3s9at1.json")
 
 # Custom CSS for "Grand" Glassmorphism Look
 st.markdown("""
@@ -77,10 +62,7 @@ if 'usage_data' not in st.session_state:
 # --- 3. Sidebar Control Center ---
 with st.sidebar:
     st.markdown("# 💎 Elite Control")
-    if lottie_ai:
-        st_lottie(lottie_ai, height=120, key="ai_icon")
-    else:
-        st.write("🤖 AI Engine Active")
+    st.write("🤖 AI Engine Active")
     
     with st.expander("🏢 BRANDING & IDENTITY", expanded=True):
         company_choice = st.selectbox("Select Template", ["W3G", "Synectics", "ProTouch"])
@@ -137,7 +119,7 @@ with col2:
 if uploaded_file and generate_btn:
     with st.status("🚀 Transforming Content...", expanded=True) as status:
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.5-flash')
             
             # AI Logic construction
             sum_p = "DO NOT generate a summary."
@@ -189,10 +171,7 @@ if st.session_state.original_ai_output:
     
     with c_preview:
         st.markdown("#### ✅ Final Steps")
-        if lottie_success:
-            st_lottie(lottie_success, height=200, key="success_icon")
-        else:
-            st.success("Transformation Complete!")
+        st.success("Transformation Complete!")
             
         st.info("Review your changes. The order in the sidebar will be reflected in the final document.")
         
