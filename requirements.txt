@@ -3,4 +3,4 @@ PyPDF2
 python-docx
 google-generativeai
 Pillow
-streamlit-lottie
+
