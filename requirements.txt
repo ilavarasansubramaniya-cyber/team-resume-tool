@@ -1,12 +1,5 @@
-# Core Streamlit
-streamlit>=1.35.0
- 
-# Groq API via OpenAI-compatible SDK
-openai>=1.30.0
- 
-# Resume file parsing
-PyPDF2>=3.0.0
-python-docx>=1.1.0
- 
-# Image handling (for PNG/JPG resume uploads)
-Pillow>=10.0.0
+streamlit
+PyPDF2
+python-docx
+Pillow
+groq
