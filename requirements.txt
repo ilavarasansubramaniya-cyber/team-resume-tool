@@ -2,5 +2,5 @@ streamlit
 PyPDF2
 python-docx
 Pillow
-groq
+google.generativeai
 
