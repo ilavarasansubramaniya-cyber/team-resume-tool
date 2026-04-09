@@ -72,11 +72,14 @@ uploaded_file = st.file_uploader("Upload Source Resume", type=["pdf", "docx", "p
 if uploaded_file and st.button("✨ Generate Professional Draft"):
     with st.status("AI is analyzing and formatting...", expanded=True) as status:
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            # UPDATED: Changed model name to gemini-2.5-flash
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
             sum_p = "DO NOT generate a summary section."
             if include_summary:
-                sum_p = f"ALWAYS generate a 'SUMMARY:' section. Develop these points into the narrative: {custom_summary_points}"
-            priv_p = "CRITICAL: Replace ALL employer names with '[CONFIDENTIAL]'." if make_confidential else ""
+                sum_p = f"ALWAYS generate a 'SUMMARY:' section. Professionally develop these points into the narrative: {custom_summary_points}"
+            
+            priv_p = "CRITICAL: Replace ALL employer names in the Work Experience section with exactly '[CONFIDENTIAL]'." if make_confidential else ""
 
             prompt = f"""
             Reformat this resume keeping ONLY original sections. 
@@ -123,7 +126,7 @@ if st.session_state.original_ai_output:
             hr = hp.add_run(h)
             hr.bold, hr.font.size, hr.font.name = True, Pt(12), 'Arial'
             
-            last_comp = False
+            last_was_company = False
             for line in content_dict[h]:
                 if "|" in line:
                     doc.add_paragraph().paragraph_format.space_before = Pt(12)
@@ -137,14 +140,14 @@ if st.session_state.original_ai_output:
                     p_dt.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                     rd = p_dt.add_run(parts[-1].strip())
                     rd.italic, rd.font.size, rd.font.name = True, Pt(10), 'Arial'
-                    last_comp = True
+                    last_was_company = True
                 else:
                     pb = doc.add_paragraph()
-                    if last_comp:
+                    if last_was_company:
                         rj = pb.add_run(line.title())
                         rj.font.name = 'Arial'
                         pb.paragraph_format.space_after = Pt(8)
-                        last_comp = False
+                        last_was_company = False
                     else:
                         rt = pb.add_run(line)
                         rt.font.name = 'Arial'
