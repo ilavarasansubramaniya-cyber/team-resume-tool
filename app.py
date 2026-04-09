@@ -85,24 +85,20 @@ if uploaded_file and st.button("✨ START AI TRANSFORMATION"):
         try:
             summary_instruction = f"Create a 'SUMMARY:' section based on: {custom_summary_points}" if include_summary else "No summary."
             
-            # AGGRESSIVE REDACTION PROMPT
             redaction_instruction = ""
             if make_confidential:
                 redaction_instruction = """
-                CRITICAL INSTRUCTION: You MUST redact all employer/company names. 
-                Replace 'HEDLEY INTERNATIONAL', 'UK HOTEL HOLDINGS', and ANY other company name with exactly '[CONFIDENTIAL]'.
-                If you see a name like 'UK HOTEL HOLDINGS, FZC, EMIRATES', change it to '[CONFIDENTIAL], EMIRATES'.
-                DO NOT LEAVE ANY COMPANY NAMES IN THE OUTPUT.
+                CRITICAL: You MUST redact all employer/company names. 
+                Replace names like 'HEDLEY INTERNATIONAL', 'UK HOTEL HOLDINGS', etc. with '[CONFIDENTIAL]'.
                 """
 
             system_prompt = f"""
             {redaction_instruction}
-            Format the resume text provided by the user.
             1. Headers: ALL CAPS ending with a colon (e.g., EXPERIENCE:).
             2. {summary_instruction}
             3. Experience/Education Line 1: 'Company/University | Date Range'.
             4. Experience/Education Line 2: The Job Title or Degree.
-            5. Bullet points: DO NOT use markdown symbols. Just list the responsibility lines.
+            5. Body text: Return simple lines of text. DO NOT use markdown symbols (*, -).
             """
             
             if uploaded_file.type == "application/pdf":
@@ -128,7 +124,6 @@ if st.session_state.original_ai_output:
     doc = docx.Document(t_path) if os.path.exists(t_path) else docx.Document()
     set_arial_font(doc)
 
-    # Place Document Title at the top
     if not replace_placeholder_in_doc(doc, "[DOCUMENT_TITLE]", document_title.upper()):
         t_p = doc.add_paragraph()
         t_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -146,8 +141,8 @@ if st.session_state.original_ai_output:
         hp.add_run(h).bold = True
         
         is_experience = any(x in h for x in ["EXPERIENCE", "WORK", "HISTORY", "EMPLOYMENT"])
-        last_was_header_line = False # Tracking the 'Company | Date' line
-        last_was_title_line = False  # Tracking the 'Job Title' line
+        last_was_header_line = False 
+        last_was_title_line = False 
 
         for line in content_dict[h]:
             if "|" in line:
@@ -162,19 +157,19 @@ if st.session_state.original_ai_output:
                 p_dt.add_run(parts[-1].strip()).italic = True
                 last_was_header_line = True
             elif last_was_header_line:
-                # This is the Job Title
                 p = doc.add_paragraph()
                 p.add_run(line.strip().title())
                 p.paragraph_format.space_after = Pt(4)
                 last_was_header_line = False
                 last_was_title_line = True
             elif is_experience and not (last_was_header_line or last_was_title_line):
-                # These are job responsibilities (Bullets)
-                p = doc.add_paragraph(f"• {line.strip()}", style='List Bullet')
-                p.paragraph_format.left_indent = Inches(0.25)
+                # --- FIX: MANUAL BULLETS TO PREVENT KEYERROR ---
+                p = doc.add_paragraph()
+                p.add_run(f"• {line.strip()}")
+                p.paragraph_format.left_indent = Inches(0.4)
+                p.paragraph_format.first_line_indent = Inches(-0.2)
                 p.paragraph_format.space_after = Pt(2)
             else:
-                # Normal paragraph (Summary, etc.)
                 doc.add_paragraph(line.strip())
                 last_was_title_line = False
 
