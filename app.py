@@ -8,19 +8,8 @@ import google.generativeai as genai
 import os
 from PIL import Image 
 
-# --- 1. Grand UI Config ---
+# --- 1. UI Config ---
 st.set_page_config(page_title="ResumePro Elite", layout="wide", page_icon="💎")
-
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
-    html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
-    .main { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
-    [data-testid="stSidebar"] { background-color: rgba(255, 255, 255, 0.4); backdrop-filter: blur(10px); }
-    .stButton>button { width: 100%; border-radius: 12px; height: 3.5em; background: linear-gradient(45deg, #007bff, #6610f2); color: white; font-weight: bold; border: none; }
-    .stDownloadButton>button { width: 100%; border-radius: 12px; height: 3.5em; background: linear-gradient(45deg, #28a745, #20c997); color: white; border: none; }
-    </style>
-    """, unsafe_allow_html=True)
 
 # --- 2. AI Engine Config ---
 MODEL_NAME = "gemini-2.5-flash-lite"
@@ -36,20 +25,22 @@ except Exception as e:
 if 'original_ai_output' not in st.session_state:
     st.session_state.original_ai_output = ""
 
-# --- 3. Sidebar Control ---
+# --- 3. Sidebar ---
 with st.sidebar:
     st.markdown("# 💎 Elite Control")
     with st.expander("🏢 BRANDING", expanded=True):
         company_choice = st.selectbox("Select Template", ["W3G", "Synectics", "ProTouch"])
         contact_number = st.text_input("Contact Number", value="123-456-7890")
-        document_title = st.text_input("Document Title", value="RESUME")
+        # Logic: Default to RESUME if empty
+        raw_title = st.text_input("Document Title", placeholder="RESUME")
+        document_title = raw_title.strip().upper() if raw_title.strip() else "RESUME"
     
     with st.expander("🧠 AI ENGINE SETTINGS", expanded=True):
         include_summary = st.checkbox("Develop Executive Summary", value=True)
         custom_points = st.text_area("Custom Points", placeholder="Leadership, ROI...")
         make_confidential = st.checkbox("Anonymize Employers [CONFIDENTIAL]", value=False)
 
-# --- 4. Helper Functions ---
+# --- 4. Logic Functions ---
 def get_sections_dict(text):
     sections, current_header = {}, "GENERAL"
     for line in text.split('\n'):
@@ -64,43 +55,40 @@ def get_sections_dict(text):
     return sections
 
 def replace_placeholder_in_doc(doc, placeholder, replacement):
-    """Deep search and replace including tables and headers."""
     for p in doc.paragraphs:
         if placeholder in p.text:
             for run in p.runs:
                 run.text = run.text.replace(placeholder, replacement)
+                run.font.name = 'Arial'
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
                     if placeholder in p.text:
                         p.text = p.text.replace(placeholder, replacement)
+                        for run in p.runs: run.font.name = 'Arial'
 
 # --- 5. Main Hero Section ---
 st.title("Professional Resume Artisan")
-uploaded_file = st.file_uploader("Drop Resume (PDF, DOCX, or Image)", type=["pdf", "docx", "png", "jpg", "jpeg"])
+uploaded_file = st.file_uploader("Drop Resume", type=["pdf", "docx", "png", "jpg", "jpeg"])
 generate_btn = st.button("✨ START AI TRANSFORMATION")
 
 if uploaded_file and generate_btn:
     with st.status("🛠️ Re-architecting Content...", expanded=True):
         try:
             model = genai.GenerativeModel(MODEL_NAME)
-            
-            sum_p = f"ALWAYS generate a 'SUMMARY:' section focusing on: {custom_points}" if include_summary else "No summary."
-            
-            priv_p = ""
-            if make_confidential:
-                priv_p = ("CRITICAL: Identify all employer/company names in the Work Experience section. "
-                          "Replace every instance with the text '[CONFIDENTIAL]'. Do not leave original names.")
+            sum_p = f"Generate 'SUMMARY:' focusing on: {custom_points}" if include_summary else "No summary."
+            priv_p = "CRITICAL: Replace employer names with '[CONFIDENTIAL]'." if make_confidential else ""
 
             prompt = f"""
-            TASK: Reformat this resume.
-            Headers: ALL CAPS ending in colon (e.g. SKILLS:).
-            {sum_p}
-            {priv_p}
-            Experience/Education: 'Company or School | Date Range'.
-            Job Title: On the very next line.
-            Skills: One item per line. No bolding (**) or numbers.
+            TASK: Reformat this resume into professional text.
+            1. Headers: ALL CAPS ending in colon.
+            2. {sum_p}
+            3. {priv_p}
+            4. Experience/Education: 'Company/School | Date Range' (Keep dates on one line).
+            5. Job Title: On next line.
+            6. Skills: One per line.
+            7. Formatting: No bolding (**) in raw text.
             """
             
             if uploaded_file.type == "application/pdf":
@@ -110,10 +98,8 @@ if uploaded_file and generate_btn:
             else:
                 raw = Image.open(uploaded_file)
             
-            # Handle list vs string input for multimodal
             input_content = [prompt, raw] if not isinstance(raw, str) else [prompt, f"TEXT:\n{raw}"]
             response = model.generate_content(input_content)
-            
             st.session_state.original_ai_output = response.text.replace("**", "")
             st.balloons()
         except Exception as e:
@@ -127,72 +113,66 @@ if st.session_state.original_ai_output:
 
     c_edit, c_preview = st.columns([1.5, 1])
     with c_edit:
-        st.markdown("#### 🖋️ Live Editor")
-        final_text = st.text_area("Edit Content:", value=st.session_state.original_ai_output, height=600, label_visibility="collapsed")
+        final_text = st.text_area("Live Editor:", value=st.session_state.original_ai_output, height=600)
     
     with c_preview:
         st.markdown("#### ✅ Finalize")
-        if make_confidential:
-            st.info("💡 Pro-tip: Double-check the redactions in the editor before downloading.")
-            
-        st.success("Transformation Complete!")
-
+        
         # Template Selection
         t_map = {"W3G": "w3g_template.docx", "Synectics": "synectics_template.docx", "ProTouch": "protouch_template.docx"}
         t_path = t_map.get(company_choice)
-        
-        if os.path.exists(t_path):
-            doc = docx.Document(t_path)
-        else:
-            doc = docx.Document()
-            st.warning(f"Template '{t_path}' not found. Using default blank document.")
+        doc = docx.Document(t_path) if os.path.exists(t_path) else docx.Document()
 
-        # Header/Branding
+        # Apply Global Arial
+        style = doc.styles['Normal']
+        style.font.name, style.font.size = 'Arial', Pt(10.5)
+
         replace_placeholder_in_doc(doc, "[CONTACT_NUMBER]", contact_number)
-        replace_placeholder_in_doc(doc, "[DOCUMENT_TITLE]", document_title.upper())
+        replace_placeholder_in_doc(doc, "[DOCUMENT_TITLE]", document_title)
 
-        # Build Document Body
         new_content = get_sections_dict(final_text)
         for h in header_order:
             if h in new_content:
-                # Add Header Paragraph
+                # --- HEADER SPACING & PREVENTION ---
                 hp = doc.add_paragraph()
-                hp.paragraph_format.space_before = Pt(12)
+                hp.paragraph_format.space_before = Pt(18) # Uniform space before header
+                hp.paragraph_format.space_after = Pt(6)   # Uniform space after header
+                hp.paragraph_format.keep_with_next = True # Push to next page if it's the last line
+                
                 hr = hp.add_run(h)
-                hr.bold, hr.font.name, hr.font.size = True, 'Arial', Pt(12)
+                hr.bold, hr.font.name, hr.font.size = True, 'Arial', Pt(11)
                 
                 is_skills = "SKILL" in h.upper()
-                last_comp = False
                 
                 for line in new_content[h]:
                     if "|" in line:
-                        # Job/Education Entry Table
+                        # Professional Table for Uniform Width (Prevents date wrapping)
                         tbl = doc.add_table(rows=1, cols=2)
                         tbl.autofit = False
                         cl, cr = tbl.rows[0].cells[0], tbl.rows[0].cells[1]
-                        cl.width, cr.width = Inches(5.2), Inches(1.8)
+                        cl.width, cr.width = Inches(5.1), Inches(1.9) # Fixed width for single-line dates
+                        
                         parts = line.split("|")
-                        cl.paragraphs[0].add_run(parts[0].strip().upper()).bold = True
-                        p_dt = cr.paragraphs[0]
-                        p_dt.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                        p_dt.add_run(parts[-1].strip()).italic = True
-                        last_comp = True
+                        p_left = cl.paragraphs[0]
+                        run_l = p_left.add_run(parts[0].strip().upper())
+                        run_l.bold, run_l.font.name = True, 'Arial'
+                        
+                        p_right = cr.paragraphs[0]
+                        p_right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                        run_r = p_right.add_run(parts[-1].strip())
+                        run_r.italic, run_r.font.name = True, 'Arial'
+                    
                     elif is_skills:
-                        # Manual Bullets (Safe from Style KeyError)
                         p = doc.add_paragraph()
                         p.paragraph_format.left_indent = Inches(0.25)
-                        p.paragraph_format.first_line_indent = Inches(-0.25)
-                        p.add_run(f"•\t{line}")
+                        p.add_run(f"•\t{line}").font.name = 'Arial'
                         p.paragraph_format.space_after = Pt(2)
+                    
                     else:
-                        # Job Title or Description
-                        p = doc.add_paragraph(line)
-                        if last_comp:
-                            p.paragraph_format.space_after = Pt(8)
-                            last_comp = False
+                        p = doc.add_paragraph()
+                        p.paragraph_format.space_after = Pt(4) # Uniform paragraph spacing
+                        p.add_run(line).font.name = 'Arial'
 
         buf = io.BytesIO()
         doc.save(buf)
-        st.download_button(label=f"📥 DOWNLOAD {company_choice} DOCX", 
-                            data=buf.getvalue(), 
-                            file_name=f"{document_title}_{company_choice}.docx")
+        st.download_button(label=f"📥 DOWNLOAD {company_choice} DOCX", data=buf.getvalue(), file_name=f"{document_title}.docx")
