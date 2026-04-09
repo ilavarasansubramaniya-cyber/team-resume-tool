@@ -4,25 +4,63 @@ import docx
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 import io
 import google.generativeai as genai
 import os
 from PIL import Image
 
-# --- 1. UI Config ---
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. UI Config
+# ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="ResumePro Elite", layout="wide", page_icon="💎")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
-    html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .main { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
-    .stButton>button { width: 100%; border-radius: 12px; height: 3.5em; background: #007bff; color: white; font-weight: bold; border: none; }
-    .stDownloadButton>button { width: 100%; border-radius: 12px; height: 3.5em; background: #28a745; color: white; border: none; }
+
+    /* Primary action button */
+    .stButton>button {
+        width: 100%; border-radius: 12px; height: 3.5em;
+        background: #007bff; color: white; font-weight: bold; border: none;
+    }
+
+    /* Download button */
+    .stDownloadButton>button {
+        width: 100%; border-radius: 12px; height: 3.5em;
+        background: #28a745; color: white; border: none;
+    }
+
+    /* ── SAVE HINT BANNER ── */
+    .save-hint {
+        background: #fff3cd;
+        border: 2px solid #ffc107;
+        border-radius: 10px;
+        padding: 10px 16px;
+        font-size: 15px;
+        font-weight: 700;
+        color: #7d4e00;
+        text-align: center;
+        margin-bottom: 8px;
+        letter-spacing: 0.3px;
+    }
+    .save-hint kbd {
+        background: #343a40;
+        color: #fff;
+        border-radius: 5px;
+        padding: 2px 7px;
+        font-size: 13px;
+        font-family: monospace;
+        margin: 0 2px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. AI Engine Config ---
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. AI Engine Config
+# ─────────────────────────────────────────────────────────────────────────────
 MODEL_NAME = "gemini-2.5-flash-lite"
 
 try:
@@ -33,34 +71,50 @@ try:
 except Exception as e:
     st.error(f"Setup Error: {e}")
 
-if 'original_ai_output' not in st.session_state:
+if "original_ai_output" not in st.session_state:
     st.session_state.original_ai_output = ""
 
-# --- 3. Sidebar ---
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. Sidebar
+# ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("# 💎 Elite Control")
     with st.expander("🏢 BRANDING", expanded=True):
         company_choice = st.selectbox("Select Template", ["W3G", "Synectics", "ProTouch"])
         contact_number = st.text_input("Contact Number", value="123-456-7890")
-        raw_title = st.text_input("Document Title", placeholder="Enter Name or Title")
+        raw_title      = st.text_input("Document Title", placeholder="Enter Name or Title")
         document_title = raw_title.strip().upper() if raw_title.strip() else "RESUME"
 
     with st.expander("🧠 AI ENGINE SETTINGS", expanded=True):
-        include_summary = st.checkbox("Develop Executive Summary", value=True)
-        custom_points = st.text_area("Custom Points", placeholder="Leadership, ROI...")
+        include_summary  = st.checkbox("Develop Executive Summary", value=True)
+        custom_points    = st.text_area("Custom Points", placeholder="Leadership, ROI...")
         make_confidential = st.checkbox("Anonymize Employers [CONFIDENTIAL]", value=False)
 
-# ── Spacing constants ─────────────────────────────────────────────────────────
-SECTION_SPACE_PT   = 10   # uniform space before & after every section header
-JOB_BLOCK_SPACE_PT = 10   # space above each Company | Date table row
-LINE_PT            = 12   # 1 line ≈ 12 pt  (used for page-boundary spacing)
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Spacing constants  (all uniform — one value rules them all)
+# ─────────────────────────────────────────────────────────────────────────────
+SP = 8          # Pt — the single uniform spacing unit used everywhere
+TWO_LINE_PT = 24  # 2 lines ≈ 24 pt  (page-boundary spacing)
 
-# --- 4. Helper / Logic Functions ---
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Helper / Logic Functions
+# ─────────────────────────────────────────────────────────────────────────────
 
-def get_sections_dict(text):
-    """Parses AI text into {HEADER: [lines]}, filtering skills-section noise."""
+def sentence_case(text: str) -> str:
+    """
+    First letter of the first word in CAPS, rest lowercase — per the requirement.
+    e.g. 'TAX PLANNING & GAAP' → 'Tax planning & gaap'
+    """
+    t = text.strip()
+    if not t:
+        return t
+    return t[0].upper() + t[1:].lower()
+
+
+def get_sections_dict(text: str) -> dict:
+    """Parse AI text into {HEADER: [lines]}, dropping skills-section noise."""
     sections, current_header = {}, None
-    for line in text.split('\n'):
+    for line in text.split("\n"):
         clean = line.strip()
         if not clean:
             continue
@@ -76,98 +130,139 @@ def get_sections_dict(text):
     return sections
 
 
-def replace_all_placeholders(doc, contact, title):
+def replace_all_placeholders(doc, contact: str, title: str):
     """Replace [CONTACT_NUMBER] and [DOCUMENT_TITLE] everywhere in the doc."""
+    targets = {"[CONTACT_NUMBER]": contact, "[DOCUMENT_TITLE]": title}
     for section in doc.sections:
         for part in [section.header, section.footer]:
             for p in part.paragraphs:
-                if "[CONTACT_NUMBER]" in p.text:
-                    p.text = p.text.replace("[CONTACT_NUMBER]", contact)
-                if "[DOCUMENT_TITLE]" in p.text:
-                    p.text = p.text.replace("[DOCUMENT_TITLE]", title)
+                for token, val in targets.items():
+                    if token in p.text:
+                        p.text = p.text.replace(token, val)
     for p in doc.paragraphs:
-        if "[CONTACT_NUMBER]" in p.text:
-            p.text = p.text.replace("[CONTACT_NUMBER]", contact)
-        if "[DOCUMENT_TITLE]" in p.text:
-            p.text = p.text.replace("[DOCUMENT_TITLE]", title)
+        for token, val in targets.items():
+            if token in p.text:
+                p.text = p.text.replace(token, val)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    if "[CONTACT_NUMBER]" in p.text:
-                        p.text = p.text.replace("[CONTACT_NUMBER]", contact)
-                    if "[DOCUMENT_TITLE]" in p.text:
-                        p.text = p.text.replace("[DOCUMENT_TITLE]", title)
+                    for token, val in targets.items():
+                        if token in p.text:
+                            p.text = p.text.replace(token, val)
 
 
 # ── Section-type detectors ────────────────────────────────────────────────────
-def _is_list_section(h):
-    """Skills / Certifications / Tools / Technologies → bullet list, lowercase."""
-    return any(kw in h.upper() for kw in ["SKILL", "CERTIF", "TOOL", "TECHNOLOG", "COMPETENC"])
+def _is_list_section(h: str) -> bool:
+    return any(kw in h.upper() for kw in
+               ["SKILL", "CERTIF", "TOOL", "TECHNOLOG", "COMPETENC"])
 
-def _is_exp_section(h):
+def _is_exp_section(h: str) -> bool:
     return "EXPERIENCE" in h.upper()
 
-def _is_edu_section(h):
+def _is_edu_section(h: str) -> bool:
     return "EDUCATION" in h.upper()
 
-def _is_summ_section(h):
+def _is_summ_section(h: str) -> bool:
     return "SUMMARY" in h.upper()
 
 
 # ── Content writers ───────────────────────────────────────────────────────────
-def add_bullet(doc, text, bold=False):
-    """Add a bullet line. bold=False → descriptions and skills are never bold."""
+def _base_run(p, text: str, bold=False, italic=False, size_pt=10.5):
+    run = p.add_run(text)
+    run.bold      = bold
+    run.italic    = italic
+    run.font.name = "Arial"
+    run.font.size = Pt(size_pt)
+    return run
+
+
+def add_bullet(doc, text: str, bold=False):
+    """Single bullet line. Never bold by default."""
     p = doc.add_paragraph()
     p.paragraph_format.left_indent       = Inches(0.25)
     p.paragraph_format.first_line_indent = Inches(-0.15)
-    p.paragraph_format.space_after       = Pt(3)
-    clean = text.lstrip('•*-– ').strip()
-    run = p.add_run(f"•  {clean}")
-    run.bold      = bold
-    run.font.name = 'Arial'
-    run.font.size = Pt(10.5)
+    p.paragraph_format.space_before      = Pt(0)
+    p.paragraph_format.space_after       = Pt(SP)
+    clean = text.lstrip("•*-– ").strip()
+    _base_run(p, f"•  {clean}", bold=bold)
     return p
 
 
-def add_job_table(doc, line):
-    """
-    'Company | Date'  →  2-column table.
-    Left: bold company name (UPPER).  Right: italic date (right-aligned).
-    Space of JOB_BLOCK_SPACE_PT above the row.
-    """
-    tbl = doc.add_table(rows=1, cols=2)
-    tbl.autofit = False
-    cl, cr = tbl.rows[0].cells[0], tbl.rows[0].cells[1]
-    cl.width, cr.width = Inches(5.1), Inches(1.9)
-
-    parts = line.split("|")
-    co_run = cl.paragraphs[0].add_run(parts[0].strip().upper())
-    co_run.bold      = True
-    co_run.font.name = 'Arial'
-    co_run.font.size = Pt(10.5)
-
-    p_right = cr.paragraphs[0]
-    p_right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    dt_run = p_right.add_run(parts[-1].strip())
-    dt_run.italic    = True
-    dt_run.font.name = 'Arial'
-    dt_run.font.size = Pt(10.5)
-
-    cl.paragraphs[0].paragraph_format.space_before = Pt(JOB_BLOCK_SPACE_PT)
-    cr.paragraphs[0].paragraph_format.space_before = Pt(JOB_BLOCK_SPACE_PT)
-    return tbl
+def add_spacer(doc, before=0, after=SP):
+    """Empty paragraph used purely for spacing."""
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(before)
+    p.paragraph_format.space_after  = Pt(after)
+    return p
 
 
-def split_by_pipe(line):
-    """
-    For list sections: split on '|' so each segment becomes its own bullet.
-    e.g. 'Tax Planning | GAAP | Auditing' → ['Tax Planning','GAAP','Auditing']
-    """
+def split_by_pipe(line: str):
+    """'A | B | C' → ['A', 'B', 'C']"""
     return [seg.strip() for seg in line.split("|") if seg.strip()]
 
 
-# --- 5. Main Content Area ---
+def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
+    """
+    Render  COMPANY NAME  ·  Job Title                      Date
+    as a single 3-column table row so company and job title are on the same line.
+    Layout: [company bold | job title bold | date italic right-aligned]
+    Column widths: 2.8" | 3.0" | 1.2"  = 7" total (standard page width)
+    """
+    tbl = doc.add_table(rows=1, cols=3)
+    tbl.autofit = False
+    c0, c1, c2 = tbl.rows[0].cells
+
+    c0.width = Inches(2.8)
+    c1.width = Inches(3.0)
+    c2.width = Inches(1.2)
+
+    # Company — bold, UPPER
+    _base_run(c0.paragraphs[0], company_part.strip().upper(), bold=True)
+
+    # Job title — bold, sentence case, same line
+    _base_run(c1.paragraphs[0], sentence_case(job_title), bold=True)
+
+    # Date — italic, right-aligned
+    c2.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _base_run(c2.paragraphs[0], date_part.strip(), italic=True)
+
+    for cell in (c0, c1, c2):
+        cell.paragraphs[0].paragraph_format.space_before = Pt(SP)
+        cell.paragraphs[0].paragraph_format.space_after  = Pt(SP)
+
+    return tbl
+
+
+def add_education_row(doc, degree_part: str, date_part: str):
+    """
+    Render  DEGREE (bold)                                    Date (italic right)
+    as a 2-column table row — degree and date on the same line.
+    """
+    tbl = doc.add_table(rows=1, cols=2)
+    tbl.autofit = False
+    cl, cr = tbl.rows[0].cells
+
+    cl.width = Inches(5.8)
+    cr.width = Inches(1.2)
+
+    # Degree — bold, sentence case
+    _base_run(cl.paragraphs[0], sentence_case(degree_part.strip()), bold=True)
+
+    # Date — italic, right-aligned
+    cr.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _base_run(cr.paragraphs[0], date_part.strip(), italic=True)
+
+    for cell in (cl, cr):
+        cell.paragraphs[0].paragraph_format.space_before = Pt(SP)
+        cell.paragraphs[0].paragraph_format.space_after  = Pt(SP)
+
+    return tbl
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Main Content Area
+# ─────────────────────────────────────────────────────────────────────────────
 st.title("Professional Resume Artisan")
 uploaded_file = st.file_uploader("Drop Resume", type=["pdf", "docx", "png", "jpg", "jpeg"])
 generate_btn  = st.button("✨ START AI TRANSFORMATION")
@@ -180,13 +275,15 @@ if uploaded_file and generate_btn:
             priv_p = "CRITICAL: Replace employer names with '[CONFIDENTIAL]'." if make_confidential else ""
 
             prompt = f"""
-            TASK: Reformat this resume.
-            Headers: ALL CAPS ending in colon.
-            {sum_p}
-            {priv_p}
-            Experience/Education: 'Company/School | Date Range' (One line).
-            Job Title: Next line.
-            Descriptions: Bullet points. No mention of 'Table' or 'Software' artifacts.
+            TASK: Reformat this resume exactly as instructed.
+            - Section headers: ALL CAPS ending in colon (e.g. EXPERIENCE:).
+            - Use EXPERIENCE: (not Experience/Education) for work history.
+            - {sum_p}
+            - {priv_p}
+            - Experience: 'Company | Date Range' on one line, THEN job title on the very next line.
+            - Education: 'Degree | Date Range' on one line, THEN institution on the very next line.
+            - All descriptions: bullet points starting with •
+            - No mention of 'Table' or 'Software' artifacts.
             """
 
             if uploaded_file.type == "application/pdf":
@@ -197,24 +294,37 @@ if uploaded_file and generate_btn:
                 raw = Image.open(uploaded_file)
 
             response = model.generate_content(
-                [prompt, raw] if not isinstance(raw, str) else [prompt, f"TEXT:\n{raw}"]
+                [prompt, raw] if not isinstance(raw, str)
+                else [prompt, f"TEXT:\n{raw}"]
             )
             st.session_state.original_ai_output = response.text.replace("**", "")
         except Exception as e:
             st.error(f"System Error: {e}")
 
-# --- 6. Editor & Export ---
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Editor & Export
+# ─────────────────────────────────────────────────────────────────────────────
 if st.session_state.original_ai_output:
     st.markdown("---")
 
     c_edit, c_preview = st.columns([1.5, 1])
+
     with c_edit:
+        # ── Visible save hint ───────────────────────────────────────────────
+        st.markdown(
+            '<div class="save-hint">'
+            '💾 Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to apply your edits'
+            ' before downloading'
+            '</div>',
+            unsafe_allow_html=True,
+        )
         st.markdown("#### 🖋️ Live Editor")
         final_text = st.text_area(
             "Content Control:",
             value=st.session_state.original_ai_output,
-            height=600,
-            label_visibility="collapsed"
+            height=580,
+            label_visibility="collapsed",
+            help="Edit content here, then press Ctrl+Enter to apply changes.",
         )
 
     current_sections = get_sections_dict(final_text)
@@ -224,33 +334,35 @@ if st.session_state.original_ai_output:
         header_order = st.multiselect(
             "Reorder Sections:",
             options=list(current_sections.keys()),
-            default=list(current_sections.keys())
+            default=list(current_sections.keys()),
         )
 
     with c_preview:
-        st.subheader("✅ Finalize")
+        st.subheader("✅ Finalize & Download")
 
-        t_map  = {"W3G": "w3g_template.docx", "Synectics": "synectics_template.docx", "ProTouch": "protouch_template.docx"}
+        t_map  = {
+            "W3G":      "w3g_template.docx",
+            "Synectics": "synectics_template.docx",
+            "ProTouch": "protouch_template.docx",
+        }
         t_path = t_map.get(company_choice)
         doc    = docx.Document(t_path) if os.path.exists(t_path) else docx.Document()
 
         # Global default font
-        style = doc.styles['Normal']
-        style.font.name = 'Arial'
+        style           = doc.styles["Normal"]
+        style.font.name = "Arial"
         style.font.size = Pt(10.5)
 
-        # Replace any [DOCUMENT_TITLE] / [CONTACT_NUMBER] in template
         replace_all_placeholders(doc, contact_number, document_title)
 
-        # ── DOCUMENT TITLE ────────────────────────────────────────────────────
-        # Bold, ALL CAPS, centered at the very top of the first page
+        # ── DOCUMENT TITLE  (bold, ALL CAPS, centred, top of page 1) ─────────
         title_p = doc.add_paragraph()
-        title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_p.alignment                    = WD_ALIGN_PARAGRAPH.CENTER
         title_p.paragraph_format.space_before = Pt(0)
-        title_p.paragraph_format.space_after  = Pt(14)
+        title_p.paragraph_format.space_after  = Pt(SP * 2)
         t_run = title_p.add_run(document_title.upper())
         t_run.bold      = True
-        t_run.font.name = 'Arial'
+        t_run.font.name = "Arial"
         t_run.font.size = Pt(14)
 
         # ── SECTION LOOP ──────────────────────────────────────────────────────
@@ -266,111 +378,117 @@ if st.session_state.original_ai_output:
 
             # ── Section Header ────────────────────────────────────────────────
             hp = doc.add_paragraph()
-            hp.paragraph_format.space_before   = Pt(SECTION_SPACE_PT)  # space BEFORE header
-            hp.paragraph_format.space_after    = Pt(SECTION_SPACE_PT)  # space AFTER header
+            hp.paragraph_format.space_before   = Pt(SP)
+            hp.paragraph_format.space_after    = Pt(SP)
             hp.paragraph_format.keep_with_next = True
-            hr = hp.add_run(h)
-            hr.bold      = True
-            hr.font.name = 'Arial'
-            hr.font.size = Pt(11)
+            _base_run(hp, h, bold=True, size_pt=11)
 
             # ── Section Content ───────────────────────────────────────────────
             lines = current_sections[h]
             i = 0
+
             while i < len(lines):
                 line = lines[i]
 
                 # ════════════════════════════════════════════════════════════
-                # LIST SECTIONS  (Skills / Certifications / Tools)
-                #   • '|' inside a line = separate items → each on its own line
-                #   • All lowercase, never bold
+                # LIST SECTIONS  (Skills / Certifications / Tools / etc.)
+                #   • '|' splits into individual items, each its own bullet
+                #   • Sentence case (first letter cap, rest lower)
+                #   • Never bold
                 # ════════════════════════════════════════════════════════════
                 if is_list:
                     if "|" in line:
                         for seg in split_by_pipe(line):
-                            add_bullet(doc, seg.lower(), bold=False)
+                            add_bullet(doc, sentence_case(seg), bold=False)
                     else:
-                        add_bullet(doc, line.lower(), bold=False)
+                        add_bullet(doc, sentence_case(line), bold=False)
+                    i += 1
 
                 # ════════════════════════════════════════════════════════════
-                # EXPERIENCE / EDUCATION
+                # EXPERIENCE
+                #   Company | Date  +  next line = Job Title
+                #   → rendered as a single 3-column row (same line)
                 # ════════════════════════════════════════════════════════════
-                elif is_job:
-
+                elif is_exp:
                     if "|" in line:
-                        # ── Company | Date row ────────────────────────────
-                        add_job_table(doc, line)
-
-                    elif i > 0 and "|" in lines[i - 1]:
-                        # ── Title line (immediately after Company|Date) ───
-                        p = doc.add_paragraph()
-                        p.paragraph_format.space_before = Pt(4)
-                        p.paragraph_format.space_after  = Pt(4)
-                        run = p.add_run(line.title())   # title case (mixed caps)
-                        run.bold      = True            # bold for job title / degree
-                        run.font.name = 'Arial'
-                        run.font.size = Pt(10.5)
-
-                        # Education sub-lines (institution, location) after the
-                        # degree/title line → handled as unbold plain text below
-                        # via the edu-institution branch (i+1 onward).
-
-                    elif is_edu:
-                        # ── Institution / location lines in Education ─────
-                        # These are NOT the degree line (handled above), so unbold
-                        p = doc.add_paragraph()
-                        p.paragraph_format.space_after = Pt(3)
-                        run = p.add_run(line)
-                        run.bold      = False
-                        run.font.name = 'Arial'
-                        run.font.size = Pt(10.5)
-
+                        parts       = line.split("|")
+                        company_str = parts[0].strip()
+                        date_str    = parts[-1].strip()
+                        # Peek ahead for the job title
+                        job_title = ""
+                        if i + 1 < len(lines) and "|" not in lines[i + 1]:
+                            job_title = lines[i + 1]
+                            i += 1   # consume the title line
+                        add_experience_row(doc, company_str, date_str, job_title)
                     else:
-                        # ── Job description bullet ────────────────────────
-                        add_bullet(doc, line, bold=False)   # never bold
+                        # Job description bullet — sentence case, not bold
+                        add_bullet(doc, sentence_case(line), bold=False)
+                    i += 1
+
+                # ════════════════════════════════════════════════════════════
+                # EDUCATION
+                #   Degree | Date  →  bold degree, italic date, same line
+                #   Next line = institution — unbold plain text
+                # ════════════════════════════════════════════════════════════
+                elif is_edu:
+                    if "|" in line:
+                        parts      = line.split("|")
+                        degree_str = parts[0].strip()
+                        date_str   = parts[-1].strip()
+                        add_education_row(doc, degree_str, date_str)
+                        # Institution line(s) follow: unbold, sentence case
+                        while i + 1 < len(lines) and "|" not in lines[i + 1]:
+                            i += 1
+                            inst_p = doc.add_paragraph()
+                            inst_p.paragraph_format.space_before = Pt(0)
+                            inst_p.paragraph_format.space_after  = Pt(SP)
+                            _base_run(inst_p, sentence_case(lines[i]),
+                                      bold=False)
+                    else:
+                        # Any stray line in education → plain, sentence case
+                        p = doc.add_paragraph()
+                        p.paragraph_format.space_after = Pt(SP)
+                        _base_run(p, sentence_case(line), bold=False)
+                    i += 1
 
                 # ════════════════════════════════════════════════════════════
                 # SUMMARY
                 # ════════════════════════════════════════════════════════════
                 elif is_summ:
                     p = doc.add_paragraph(line)
-                    p.paragraph_format.space_after = Pt(SECTION_SPACE_PT)
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after  = Pt(SP)
+                    i += 1
 
                 # ════════════════════════════════════════════════════════════
-                # EVERYTHING ELSE  → bullet, lowercase, not bold
+                # EVERYTHING ELSE  → bullet, sentence case, not bold
                 # ════════════════════════════════════════════════════════════
                 else:
-                    add_bullet(doc, line.lower(), bold=False)
+                    add_bullet(doc, sentence_case(line), bold=False)
+                    i += 1
 
-                i += 1
-
-            # Small trailing spacer after experience / education sections
-            if is_job:
-                spacer = doc.add_paragraph()
-                spacer.paragraph_format.space_before = Pt(0)
-                spacer.paragraph_format.space_after  = Pt(SECTION_SPACE_PT)
+            # Trailing spacer after every section (uniform)
+            add_spacer(doc, before=0, after=SP)
 
         # ── END-OF-DOCUMENT spacer ────────────────────────────────────────────
-        doc.add_paragraph().paragraph_format.space_before = Pt(24)
+        add_spacer(doc, before=SP, after=SP)
 
         # ── PAGE BREAK SPACING ────────────────────────────────────────────────
-        # Walk every paragraph; wherever Word inserted a hard page-break run,
-        # ensure 1 line (12 pt) of space before that paragraph (= end of page)
-        # and 1 line after it (= start of next page).
-        # This also covers section headers that Word naturally pushes to a new
-        # page: their space_before is already SECTION_SPACE_PT; we upgrade it
-        # to LINE_PT only if it already has a page-break attribute.
+        # For every hard page-break run: add 2 lines (24 pt) BEFORE the break
+        # paragraph (= end of the outgoing page) and 2 lines AFTER it
+        # (= start of the incoming page).  First page is unaffected because
+        # title_p has space_before = 0.
         for p in doc.paragraphs:
             for run in p.runs:
-                for br in run._element.findall(qn('w:br')):
-                    if br.get(qn('w:type')) == 'page':
-                        p.paragraph_format.space_before = Pt(LINE_PT)
-                        p.paragraph_format.space_after  = Pt(LINE_PT)
+                for br in run._element.findall(qn("w:br")):
+                    if br.get(qn("w:type")) == "page":
+                        p.paragraph_format.space_before = Pt(TWO_LINE_PT)
+                        p.paragraph_format.space_after  = Pt(TWO_LINE_PT)
 
         buf = io.BytesIO()
         doc.save(buf)
         st.download_button(
             label=f"📥 DOWNLOAD {company_choice} DOCX",
             data=buf.getvalue(),
-            file_name=f"{document_title}.docx"
+            file_name=f"{document_title}.docx",
         )
