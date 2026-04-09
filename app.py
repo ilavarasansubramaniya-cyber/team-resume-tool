@@ -1,4 +1,6 @@
 import streamlit as st
+from streamlit_lottie import st_lottie
+import requests
 import PyPDF2
 import docx
 from docx.shared import Inches, Pt
@@ -8,35 +10,91 @@ import google.generativeai as genai
 import os
 from PIL import Image 
 
-# --- Page Setup ---
-st.set_page_config(page_title="ResumePro | AI Formatter", layout="wide", page_icon="📄")
+# --- 1. Grand UI Config & Animations ---
+st.set_page_config(page_title="ResumePro Elite", layout="wide", page_icon="💎")
 
-# --- AI Configuration ---
+def load_lottieurl(url: str):
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception:
+        return None
+
+# Load Animations with fallback logic
+lottie_ai = load_lottieurl("https://assets5.lottiefiles.com/packages/lf20_gssu2dkm.json")
+lottie_success = load_lottieurl("https://assets10.lottiefiles.com/packages/lf20_xl3s9at1.json")
+
+# Custom CSS for "Grand" Glassmorphism Look
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+    html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
+    .main { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
+    
+    /* Glassmorphism Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: rgba(255, 255, 255, 0.4);
+        backdrop-filter: blur(10px);
+        border-right: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    /* Grand Buttons */
+    .stButton>button {
+        width: 100%; border-radius: 12px; height: 3.5em;
+        background: linear-gradient(45deg, #007bff, #6610f2);
+        color: white; font-weight: bold; border: none;
+        transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
+    }
+    .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0, 123, 255, 0.5); }
+    
+    .stDownloadButton>button {
+        width: 100%; border-radius: 12px; height: 3.5em;
+        background: linear-gradient(45deg, #28a745, #20c997);
+        color: white; border: none; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+    }
+
+    /* Card Styling */
+    div[data-testid="stExpander"] {
+        background: white; border-radius: 15px; border: none;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.05); margin-bottom: 20px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. AI & Session Logic ---
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-except Exception:
-    st.error("API Key missing. Please set GEMINI_API_KEY in Streamlit Secrets.")
+except:
+    st.error("API Key missing in Streamlit Secrets.")
 
-# --- Initialization ---
 if 'original_ai_output' not in st.session_state:
     st.session_state.original_ai_output = ""
+if 'usage_data' not in st.session_state:
+    st.session_state.usage_data = None
 
-# --- Sidebar: Control Center ---
+# --- 3. Sidebar Control Center ---
 with st.sidebar:
-    st.title("🚀 Control Center")
-    with st.expander("🏢 BRANDING & ID", expanded=True):
-        company_choice = st.selectbox("Company Template", ["W3G", "Synectics", "ProTouch"])
+    st.markdown("# 💎 Elite Control")
+    if lottie_ai:
+        st_lottie(lottie_ai, height=120, key="ai_icon")
+    else:
+        st.write("🤖 AI Engine Active")
+    
+    with st.expander("🏢 BRANDING & IDENTITY", expanded=True):
+        company_choice = st.selectbox("Select Template", ["W3G", "Synectics", "ProTouch"])
         contact_number = st.text_input("Contact Number", value="123-456-7890")
         document_title = st.text_input("Document Title", value="RESUME")
     
-    with st.expander("⚙️ AI CONFIGURATION", expanded=True):
-        include_summary = st.checkbox("Generate AI Summary", value=True)
-        custom_summary_points = st.text_area("Extra Summary Points", placeholder="e.g. Focus on leadership...", disabled=not include_summary)
-        make_confidential = st.checkbox("Mask Company Names [CONFIDENTIAL]", value=False)
+    with st.expander("🧠 AI ENGINE SETTINGS", expanded=True):
+        include_summary = st.checkbox("Develop Executive Summary", value=True)
+        custom_summary_points = st.text_area("Custom Points to Develop", 
+                                            placeholder="e.g. Focus on leadership and ROI...", 
+                                            disabled=not include_summary)
+        make_confidential = st.checkbox("Anonymize Employers [CONFIDENTIAL]", value=False)
 
-# --- Helper Functions ---
-UNIFORM_SPACE = Pt(12) 
-
+# --- 4. Helper Functions ---
 def set_arial_font(doc):
     style = doc.styles['Normal']
     font = style.font
@@ -65,29 +123,37 @@ def replace_placeholder_in_doc(doc, placeholder, replacement):
                     if placeholder in p.text:
                         for run in p.runs: run.text = run.text.replace(placeholder, replacement)
 
-# --- Main UI ---
-st.subheader("📄 Professional Resume Formatter")
-uploaded_file = st.file_uploader("Upload Source Resume", type=["pdf", "docx", "png", "jpg", "jpeg"])
+# --- 5. Main Hero Section ---
+st.title("Professional Resume Artisan")
+st.markdown("### Elevate your candidate presentation with AI-driven precision.")
 
-if uploaded_file and st.button("✨ Generate Professional Draft"):
-    with st.status("AI is analyzing and formatting...", expanded=True) as status:
+col1, col2 = st.columns([2, 1])
+with col1:
+    uploaded_file = st.file_uploader("Drop Resume (PDF, DOCX, or Image)", type=["pdf", "docx", "png", "jpg", "jpeg"])
+with col2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    generate_btn = st.button("✨ START AI TRANSFORMATION")
+
+if uploaded_file and generate_btn:
+    with st.status("🚀 Transforming Content...", expanded=True) as status:
         try:
-            # UPDATED: Changed model name to gemini-2.5-flash
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
-            sum_p = "DO NOT generate a summary section."
+            # AI Logic construction
+            sum_p = "DO NOT generate a summary."
             if include_summary:
-                sum_p = f"ALWAYS generate a 'SUMMARY:' section. Professionally develop these points into the narrative: {custom_summary_points}"
+                sum_p = f"ALWAYS generate a 'SUMMARY:' section. Professionally develop these points into the narrative: '{custom_summary_points}'"
             
             priv_p = "CRITICAL: Replace ALL employer names in the Work Experience section with exactly '[CONFIDENTIAL]'." if make_confidential else ""
 
             prompt = f"""
-            Reformat this resume keeping ONLY original sections. 
+            Reformat this resume perfectly. 
             Headers: ALL CAPS ending in colon.
             {sum_p}
             {priv_p}
-            Work Exp/Education: 'Company/University | Date Range'. Job Title on next line.
-            ONLY use '|' for date separation. Skills/Tools: one per line. No bolding/numbers.
+            Experience/Education: 'Company/University | Date Range'.
+            Job Title on very next line. ONLY use '|' for date separation.
+            One skill/tool per line. No bolding (**) or numbers.
             """
             
             if uploaded_file.type == "application/pdf":
@@ -101,58 +167,81 @@ if uploaded_file and st.button("✨ Generate Professional Draft"):
             
             response = model.generate_content(input_data)
             st.session_state.original_ai_output = response.text.replace("**", "")
-            status.update(label="Draft Ready!", state="complete", expanded=False)
+            st.session_state.usage_data = response.usage_metadata
+            status.update(label="Transformation Complete!", state="complete", expanded=False)
+            st.balloons()
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"System Error: {e}")
 
-# --- Document Builder ---
+# --- 6. Editor & Export ---
 if st.session_state.original_ai_output:
-    final_text = st.text_area("Final Polish:", value=st.session_state.original_ai_output, height=400)
-    content_dict = get_sections_dict(final_text)
+    st.markdown("---")
+    content_dict = get_sections_dict(st.session_state.original_ai_output)
     
-    header_order = st.multiselect("Reorder Sections:", options=list(content_dict.keys()), default=list(content_dict.keys()))
+    with st.sidebar:
+        with st.expander("🔄 DYNAMIC JUMBLE", expanded=True):
+            header_order = st.multiselect("Reorder Sections:", options=list(content_dict.keys()), default=list(content_dict.keys()))
 
-    t_map = {"W3G": "w3g_template.docx", "Synectics": "synectics_template.docx", "ProTouch": "protouch_template.docx"}
-    t_path = os.path.join(os.path.dirname(__file__), t_map.get(company_choice, ""))
-    doc = docx.Document(t_path) if os.path.exists(t_path) else docx.Document()
-    set_arial_font(doc)
-    replace_placeholder_in_doc(doc, "[CONTACT_NUMBER]", contact_number)
-    replace_placeholder_in_doc(doc, "[DOCUMENT_TITLE]", document_title.upper())
-
-    for h in header_order:
-        if h in content_dict:
-            hp = doc.add_paragraph()
-            hp.paragraph_format.space_before = UNIFORM_SPACE
-            hr = hp.add_run(h)
-            hr.bold, hr.font.size, hr.font.name = True, Pt(12), 'Arial'
+    c_edit, c_preview = st.columns([1.5, 1])
+    with c_edit:
+        st.markdown("#### 🖋️ Live Editor")
+        final_text = st.text_area("Refine AI Output:", value=st.session_state.original_ai_output, height=500, label_visibility="collapsed")
+    
+    with c_preview:
+        st.markdown("#### ✅ Final Steps")
+        if lottie_success:
+            st_lottie(lottie_success, height=200, key="success_icon")
+        else:
+            st.success("Transformation Complete!")
             
-            last_was_company = False
-            for line in content_dict[h]:
-                if "|" in line:
-                    doc.add_paragraph().paragraph_format.space_before = Pt(12)
-                    tbl = doc.add_table(rows=1, cols=2)
-                    tbl.autofit = False
-                    cl, cr = tbl.rows[0].cells[0], tbl.rows[0].cells[1]
-                    cl.width, cr.width = Inches(5.0), Inches(2.0)
-                    parts = line.split("|")
-                    cl.paragraphs[0].add_run(parts[0].strip().upper()).bold = True
-                    p_dt = cr.paragraphs[0]
-                    p_dt.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                    rd = p_dt.add_run(parts[-1].strip())
-                    rd.italic, rd.font.size, rd.font.name = True, Pt(10), 'Arial'
-                    last_was_company = True
-                else:
-                    pb = doc.add_paragraph()
-                    if last_was_company:
-                        rj = pb.add_run(line.title())
-                        rj.font.name = 'Arial'
-                        pb.paragraph_format.space_after = Pt(8)
-                        last_was_company = False
-                    else:
-                        rt = pb.add_run(line)
-                        rt.font.name = 'Arial'
-                        pb.paragraph_format.space_after = Pt(4)
+        st.info("Review your changes. The order in the sidebar will be reflected in the final document.")
+        
+        # Build Document
+        t_map = {"W3G": "w3g_template.docx", "Synectics": "synectics_template.docx", "ProTouch": "protouch_template.docx"}
+        t_path = os.path.join(os.path.dirname(__file__), t_map.get(company_choice, ""))
+        doc = docx.Document(t_path) if os.path.exists(t_path) else docx.Document()
+        set_arial_font(doc)
+        replace_placeholder_in_doc(doc, "[CONTACT_NUMBER]", contact_number)
+        replace_placeholder_in_doc(doc, "[DOCUMENT_TITLE]", document_title.upper())
 
-    buf = io.BytesIO()
-    doc.save(buf)
-    st.download_button(label="📥 Download Resume", data=buf.getvalue(), file_name=f"{document_title}.docx")
+        # Body Build Logic
+        new_content = get_sections_dict(final_text)
+        for h in header_order:
+            if h in new_content:
+                hp = doc.add_paragraph()
+                hp.paragraph_format.space_before = Pt(12)
+                hr = hp.add_run(h)
+                hr.bold, hr.font.size, hr.font.name = True, Pt(12), 'Arial'
+                
+                last_comp = False
+                for line in new_content[h]:
+                    if "|" in line:
+                        doc.add_paragraph().paragraph_format.space_before = Pt(12)
+                        tbl = doc.add_table(rows=1, cols=2)
+                        tbl.autofit = False
+                        cl, cr = tbl.rows[0].cells[0], tbl.rows[0].cells[1]
+                        cl.width, cr.width = Inches(5.0), Inches(2.0)
+                        parts = line.split("|")
+                        cl.paragraphs[0].add_run(parts[0].strip().upper()).bold = True
+                        p_dt = cr.paragraphs[0]
+                        p_dt.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                        rd = p_dt.add_run(parts[-1].strip())
+                        rd.italic, rd.font.size, rd.font.name = True, Pt(10), 'Arial'
+                        last_comp = True
+                    else:
+                        pb = doc.add_paragraph()
+                        if last_comp:
+                            rj = pb.add_run(line.title())
+                            rj.font.name = 'Arial'
+                            pb.paragraph_format.space_after = Pt(8)
+                            last_comp = False
+                        else:
+                            rt = pb.add_run(line)
+                            rt.font.name = 'Arial'
+                            pb.paragraph_format.space_after = Pt(4)
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        st.download_button(label=f"📥 DOWNLOAD {company_choice.upper()} DOCX", 
+                           data=buf.getvalue(), 
+                           file_name=f"{document_title}_{company_choice}.docx")
