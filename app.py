@@ -6,6 +6,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 from groq import Groq
 import os
+from streamlit_sortables import sort_items  # New library for "push" reordering
 
 # --- 1. UI Config ---
 st.set_page_config(page_title="ResumePro Elite", layout="wide", page_icon="💎")
@@ -84,24 +85,15 @@ if uploaded_file and st.button("✨ START AI TRANSFORMATION"):
     with st.status("🚀 Processing with Llama 4 Scout...", expanded=True):
         try:
             summary_p = f"Create a 'SUMMARY:' section based on: {custom_summary_points}" if include_summary else "No summary."
-            
-            redaction_p = ""
-            if make_confidential:
-                redaction_p = """
-                MANDATORY CONFIDENTIALITY RULE: You MUST redact all employer/company names from the entire output.
-                Replace ALL occurrences of actual company names with exactly '[CONFIDENTIAL]'.
-                If a company name is inside a line like 'Company Name, Location', it becomes '[CONFIDENTIAL], Location'.
-                """
+            redaction_p = "MANDATORY: Redact all employer names to '[CONFIDENTIAL]'." if make_confidential else ""
 
             system_prompt = f"""
             {redaction_p}
-            1. Headers: ALL CAPS ending in a colon (e.g., EXPERIENCE:, SKILLS:, CERTIFICATIONS:).
+            1. Headers: ALL CAPS ending in a colon.
             2. {summary_p}
             3. Experience/Education Line 1: 'Company/University | Date Range'.
             4. Experience/Education Line 2: The Job Title or Degree.
-            5. Skills, Tools, Certifications: Output each item on a new line. Do NOT output your own bullet points (like - or *), the system will add them automatically.
-            6. Do not use markdown (**, *) anywhere.
-            7. Responsibilities under a Job Title must be separate lines of text. Do NOT output bullet symbols or numbering.
+            5. Body text: Return simple lines of text. DO NOT use markdown symbols.
             """
             
             if uploaded_file.type == "application/pdf":
@@ -120,6 +112,12 @@ if uploaded_file and st.button("✨ START AI TRANSFORMATION"):
 
 # --- 6. Document Generation ---
 if st.session_state.original_ai_output:
+    content_dict = get_sections_dict(st.session_state.original_ai_output)
+    
+    # DRAG AND DROP "PUSH" REORDERING
+    st.markdown("### 📋 Section Reorder (Drag & Drop)")
+    header_order = sort_items(list(content_dict.keys()), direction='horizontal')
+    
     final_text = st.text_area("Final Polish:", value=st.session_state.original_ai_output, height=400)
     
     t_map = {"W3G": "w3g_template.docx", "Synectics": "synectics_template.docx", "ProTouch": "protouch_template.docx"}
@@ -130,13 +128,9 @@ if st.session_state.original_ai_output:
     if not replace_placeholder_in_doc(doc, "[DOCUMENT_TITLE]", document_title.upper()):
         t_p = doc.add_paragraph()
         t_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        t_run = t_p.add_run(document_title.upper())
-        t_run.bold, t_run.font.size = True, Pt(16)
+        t_p.add_run(document_title.upper()).bold = True
 
     replace_placeholder_in_doc(doc, "[CONTACT_NUMBER]", contact_number)
-
-    content_dict = get_sections_dict(final_text)
-    header_order = st.multiselect("Reorder Sections:", options=list(content_dict.keys()), default=list(content_dict.keys()))
 
     for h in header_order:
         hp = doc.add_paragraph()
@@ -144,15 +138,13 @@ if st.session_state.original_ai_output:
         hp.paragraph_format.space_after = Pt(12)
         hp.add_run(h).bold = True
         
-        # Determine section type
         is_experience = any(x in h for x in ["EXPERIENCE", "WORK", "HISTORY", "EMPLOYMENT"])
-        is_list_section = any(x in h for x in ["SKILL", "CERTIFICATION", "TOOL", "TECHNICAL"])
+        # Added SOFTWARE and HARDWARE to the bullet logic
+        is_list_section = any(x in h for x in ["SKILL", "CERTIFICATION", "TOOL", "SOFTWARE", "HARDWARE", "TECH"])
         
         last_was_header_line = False 
-        last_was_title_line = False 
 
         for line in content_dict[h]:
-            # Clean AI-generated bullets just in case it ignores the prompt
             clean_line = line.strip().lstrip('*-• ')
             if not clean_line: continue
 
@@ -161,7 +153,6 @@ if st.session_state.original_ai_output:
                 tbl = doc.add_table(rows=1, cols=2)
                 tbl.autofit = False
                 cl, cr = tbl.rows[0].cells[0], tbl.rows[0].cells[1]
-                cl.width, cr.width = Inches(5.0), Inches(2.0)
                 parts = line.split("|")
                 cl.paragraphs[0].add_run(parts[0].strip().upper()).bold = True
                 p_dt = cr.paragraphs[0]
@@ -173,20 +164,14 @@ if st.session_state.original_ai_output:
                 p.add_run(clean_line.title())
                 p.paragraph_format.space_after = Pt(4)
                 last_was_header_line = False
-                last_was_title_line = True
-            
-            # --- BULLET POINT LOGIC FOR BOTH EXPERIENCE AND SKILLS/CERTS ---
             elif (is_experience and not last_was_header_line) or is_list_section:
                 p = doc.add_paragraph()
                 p.add_run(f"• {clean_line}")
                 p.paragraph_format.left_indent = Inches(0.4)
                 p.paragraph_format.first_line_indent = Inches(-0.2)
                 p.paragraph_format.space_after = Pt(2)
-            
             else:
-                p_body = doc.add_paragraph(clean_line)
-                p_body.paragraph_format.space_after = Pt(4)
-                last_was_title_line = False
+                doc.add_paragraph(clean_line).paragraph_format.space_after = Pt(4)
 
     buf = io.BytesIO()
     doc.save(buf)
