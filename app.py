@@ -11,7 +11,6 @@ from PIL import Image
 # --- 1. Grand UI Config ---
 st.set_page_config(page_title="ResumePro Elite", layout="wide", page_icon="💎")
 
-# Custom CSS for UI styling
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
@@ -24,7 +23,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 2. AI Engine Config ---
-# Ensure this matches the newest Gemini 2.5 identifiers
 MODEL_NAME = "gemini-2.5-flash-lite"
 
 try:
@@ -38,7 +36,7 @@ except Exception as e:
 if 'original_ai_output' not in st.session_state:
     st.session_state.original_ai_output = ""
 
-# --- 3. Sidebar Control ---
+# --- 3. Sidebar ---
 with st.sidebar:
     st.markdown("# 💎 Elite Control")
     with st.expander("🏢 BRANDING", expanded=True):
@@ -65,106 +63,123 @@ def get_sections_dict(text):
             sections[current_header].append(clean)
     return sections
 
-def set_arial_font(doc):
-    style = doc.styles['Normal']
-    style.font.name, style.font.size = 'Arial', Pt(11)
+def replace_placeholder_in_doc(doc, placeholder, replacement):
+    """Deep search and replace for template placeholders."""
+    for p in doc.paragraphs:
+        if placeholder in p.text:
+            for run in p.runs:
+                run.text = run.text.replace(placeholder, replacement)
+    # Check tables (often used in headers)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    if placeholder in p.text:
+                        p.text = p.text.replace(placeholder, replacement)
 
 # --- 5. Main Hero Section ---
 st.title("Professional Resume Artisan")
-uploaded_file = st.file_uploader("Drop Resume (PDF, DOCX, or Image)", type=["pdf", "docx", "png", "jpg", "jpeg"])
+uploaded_file = st.file_uploader("Drop Resume", type=["pdf", "docx", "png", "jpg", "jpeg"])
 generate_btn = st.button("✨ START AI TRANSFORMATION")
 
 if uploaded_file and generate_btn:
-    with st.status("🛠️ Re-architecting with Gemini 2.5 Flash-Lite...", expanded=True) as status:
+    with st.status("🛠️ Processing...", expanded=True):
         try:
             model = genai.GenerativeModel(MODEL_NAME)
-            
-            # Logic Construction
-            sum_p = "DO NOT generate a summary."
-            if include_summary:
-                sum_p = f"ALWAYS generate a 'SUMMARY:' section. Develop these points: '{custom_points}'"
-            
-            priv_p = ""
-            if make_confidential:
-                priv_p = ("CRITICAL: Identify all employer/company names in the Work Experience section. "
-                          "Replace every instance with the text '[CONFIDENTIAL]'. Do not leave original names.")
+            sum_p = f"ALWAYS generate a 'SUMMARY:' section focusing on: {custom_points}" if include_summary else "No summary."
+            priv_p = "CRITICAL: Replace all employer names with '[CONFIDENTIAL]'." if make_confidential else ""
 
             prompt = f"""
             TASK: Reformat this resume.
-            Headers: ALL CAPS ending in colon.
+            Headers: ALL CAPS ending in colon (e.g. SKILLS:).
             {sum_p}
             {priv_p}
             Experience/Education: 'Company or School | Date Range'.
-            Job Title: On the very next line.
-            Skills: One item per line. No bolding (**) or numbers.
+            Job Title: Next line after company.
+            Skills: One per line.
             """
             
-            # Extraction logic
             if uploaded_file.type == "application/pdf":
                 raw = "".join([p.extract_text() for p in PyPDF2.PdfReader(uploaded_file).pages])
-                response = model.generate_content([prompt, f"TEXT:\n{raw}"])
             elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
                 raw = "\n".join([p.text for p in docx.Document(uploaded_file).paragraphs])
-                response = model.generate_content([prompt, f"TEXT:\n{raw}"])
             else:
-                response = model.generate_content([prompt, Image.open(uploaded_file)])
+                raw = Image.open(uploaded_file)
             
+            response = model.generate_content([prompt, raw] if not isinstance(raw, str) else [prompt, f"TEXT:\n{raw}"])
             st.session_state.original_ai_output = response.text.replace("**", "")
-            status.update(label="Transformation Complete!", state="complete", expanded=False)
             st.balloons()
         except Exception as e:
-            st.error(f"System Error: {e}")
+            st.error(f"Error: {e}")
 
 # --- 6. Editor & Export ---
 if st.session_state.original_ai_output:
     st.markdown("---")
     content_dict = get_sections_dict(st.session_state.original_ai_output)
-    
-    with st.sidebar:
-        header_order = st.multiselect("Reorder Sections:", options=list(content_dict.keys()), default=list(content_dict.keys()))
+    header_order = st.sidebar.multiselect("Reorder Sections:", options=list(content_dict.keys()), default=list(content_dict.keys()))
 
     c_edit, c_preview = st.columns([1.5, 1])
     with c_edit:
-        st.markdown("#### 🖋️ Live Editor")
-        final_text = st.text_area("Final Output Edit:", value=st.session_state.original_ai_output, height=600, label_visibility="collapsed")
+        final_text = st.text_area("Live Editor:", value=st.session_state.original_ai_output, height=600)
     
     with c_preview:
-        st.markdown("#### ✅ Final Steps")
-        
-        # Security Tip - Fixed Syntax Error Here
+        st.subheader("✅ Export Settings")
         if make_confidential:
             st.info("💡 Pro-tip: Double-check the redactions in the editor before downloading.")
-            
-        st.success("Transformation Ready!")
 
-        # Document Generation
-        doc = docx.Document()
-        set_arial_font(doc)
+        # --- Template Loading Logic ---
+        t_map = {"W3G": "w3g_template.docx", "Synectics": "synectics_template.docx", "ProTouch": "protouch_template.docx"}
+        t_path = t_map.get(company_choice)
         
-        # Processing sections based on sidebar order
+        if os.path.exists(t_path):
+            doc = docx.Document(t_path)
+            st.write(f"✔️ Using {company_choice} Template")
+        else:
+            doc = docx.Document()
+            st.warning("⚠️ Template file not found. Generating standard document.")
+
+        # Replace Placeholders
+        replace_placeholder_in_doc(doc, "[CONTACT_NUMBER]", contact_number)
+        replace_placeholder_in_doc(doc, "[DOCUMENT_TITLE]", document_title.upper())
+
+        # Body Build
         new_content = get_sections_dict(final_text)
         for h in header_order:
             if h in new_content:
+                # Add Header
                 hp = doc.add_paragraph()
+                hp.paragraph_format.space_before = Pt(12)
                 hr = hp.add_run(h)
-                hr.bold, hr.font.size = True, Pt(12)
+                hr.bold, hr.font.name, hr.font.size = True, 'Arial', Pt(12)
                 
+                is_skills = "SKILL" in h.upper()
                 last_comp = False
+                
                 for line in new_content[h]:
                     if "|" in line:
+                        # Professional Table for Experience/Education
                         tbl = doc.add_table(rows=1, cols=2)
+                        tbl.autofit = False
                         cl, cr = tbl.rows[0].cells[0], tbl.rows[0].cells[1]
+                        cl.width, cr.width = Inches(5.0), Inches(2.0)
                         parts = line.split("|")
                         cl.paragraphs[0].add_run(parts[0].strip().upper()).bold = True
                         cr.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
                         cr.paragraphs[0].add_run(parts[-1].strip()).italic = True
                         last_comp = True
+                    elif is_skills:
+                        # Add as Bullet Points
+                        p = doc.add_paragraph(line, style='List Bullet')
+                        p.paragraph_format.space_after = Pt(2)
                     else:
-                        pb = doc.add_paragraph(line)
-                        last_comp = False
+                        # Standard Text
+                        p = doc.add_paragraph(line)
+                        if last_comp:
+                            p.paragraph_format.space_after = Pt(8)
+                            last_comp = False
 
         buf = io.BytesIO()
         doc.save(buf)
         st.download_button(label=f"📥 DOWNLOAD {company_choice} DOCX", 
                             data=buf.getvalue(), 
-                            file_name=f"{document_title}.docx")
+                            file_name=f"{document_title}_{company_choice}.docx")
