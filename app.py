@@ -102,13 +102,15 @@ TWO_LINE_PT = 24  # 2 lines ≈ 24 pt  (page-boundary spacing)
 
 def sentence_case(text: str) -> str:
     """
-    First letter of the first word in CAPS, rest lowercase — per the requirement.
-    e.g. 'TAX PLANNING & GAAP' → 'Tax planning & gaap'
+    Capitalise ONLY the very first character, leave everything else untouched.
+    Acronyms like GAAP, IRS, CPA, QuickBooks stay intact.
+    e.g. 'tax planning & GAAP'  -> 'Tax planning & GAAP'
+         'FULL-CYCLE ACCOUNTING' -> 'FULL-CYCLE ACCOUNTING'  (skills keep caps)
     """
     t = text.strip()
     if not t:
         return t
-    return t[0].upper() + t[1:].lower()
+    return t[0].upper() + t[1:]
 
 
 def get_sections_dict(text: str) -> dict:
@@ -204,47 +206,69 @@ def split_by_pipe(line: str):
 
 def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
     """
-    Render  COMPANY NAME  ·  Job Title                      Date
-    as a single 3-column table row so company and job title are on the same line.
-    Layout: [company bold | job title bold | date italic right-aligned]
-    Column widths: 2.8" | 3.0" | 1.2"  = 7" total (standard page width)
+    Layout (2-row table, 2 fixed-width columns):
+      Row 1:  COMPANY NAME (bold, left)  |  Date range (italic, right-aligned)
+      Row 2:  Job title (bold, left)     |  [empty — keeps date column fixed]
+
+    Fixed column widths guarantee ALL date ranges end on the exact same
+    right-hand margin regardless of their text length.
+    Col widths: 5.5" (content) + 1.5" (date) = 7" (standard body width)
     """
-    tbl = doc.add_table(rows=1, cols=3)
+    DATE_COL = Inches(1.5)
+    CONTENT_COL = Inches(5.5)
+
+    tbl = doc.add_table(rows=2, cols=2)
     tbl.autofit = False
-    c0, c1, c2 = tbl.rows[0].cells
 
-    c0.width = Inches(2.8)
-    c1.width = Inches(3.0)
-    c2.width = Inches(1.2)
+    r0c0, r0c1 = tbl.rows[0].cells   # company row
+    r1c0, r1c1 = tbl.rows[1].cells   # job title row
 
-    # Company — bold, UPPER
-    _base_run(c0.paragraphs[0], company_part.strip().upper(), bold=True)
+    # Fixed column widths on every cell
+    for cell, w in [(r0c0, CONTENT_COL), (r0c1, DATE_COL),
+                    (r1c0, CONTENT_COL), (r1c1, DATE_COL)]:
+        cell.width = w
 
-    # Job title — bold, sentence case, same line
-    _base_run(c1.paragraphs[0], sentence_case(job_title), bold=True)
+    # Row 1 left — COMPANY bold UPPER
+    _base_run(r0c0.paragraphs[0], company_part.strip().upper(), bold=True)
 
-    # Date — italic, right-aligned
-    c2.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    _base_run(c2.paragraphs[0], date_part.strip(), italic=True)
+    # Row 1 right — Date italic, RIGHT-aligned
+    r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
 
-    for cell in (c0, c1, c2):
-        cell.paragraphs[0].paragraph_format.space_before = Pt(SP)
-        cell.paragraphs[0].paragraph_format.space_after  = Pt(SP)
+    # Row 2 left — Job title bold, sentence case
+    _base_run(r1c0.paragraphs[0], sentence_case(job_title), bold=True)
+
+    # Row 2 right — empty (keeps column structure intact)
+    r1c1.paragraphs[0].text = ""
+
+    # Spacing: SP before the block (top row only), tight gap between rows
+    r0c0.paragraphs[0].paragraph_format.space_before = Pt(SP)
+    r0c1.paragraphs[0].paragraph_format.space_before = Pt(SP)
+    r0c0.paragraphs[0].paragraph_format.space_after  = Pt(2)
+    r0c1.paragraphs[0].paragraph_format.space_after  = Pt(2)
+    r1c0.paragraphs[0].paragraph_format.space_before = Pt(0)
+    r1c1.paragraphs[0].paragraph_format.space_before = Pt(0)
+    r1c0.paragraphs[0].paragraph_format.space_after  = Pt(SP)
+    r1c1.paragraphs[0].paragraph_format.space_after  = Pt(SP)
 
     return tbl
 
 
 def add_education_row(doc, degree_part: str, date_part: str):
     """
-    Render  DEGREE (bold)                                    Date (italic right)
-    as a 2-column table row — degree and date on the same line.
+    Render  Degree (bold, left)  |  Date (italic, right-aligned)
+    Same fixed column widths as experience rows so ALL dates line up.
+    Col widths: 5.5" (content) + 1.5" (date) = 7"
     """
+    DATE_COL    = Inches(1.5)
+    CONTENT_COL = Inches(5.5)
+
     tbl = doc.add_table(rows=1, cols=2)
     tbl.autofit = False
     cl, cr = tbl.rows[0].cells
 
-    cl.width = Inches(5.8)
-    cr.width = Inches(1.2)
+    cl.width = CONTENT_COL
+    cr.width = DATE_COL
 
     # Degree — bold, sentence case
     _base_run(cl.paragraphs[0], sentence_case(degree_part.strip()), bold=True)
@@ -253,9 +277,10 @@ def add_education_row(doc, degree_part: str, date_part: str):
     cr.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _base_run(cr.paragraphs[0], date_part.strip(), italic=True)
 
-    for cell in (cl, cr):
-        cell.paragraphs[0].paragraph_format.space_before = Pt(SP)
-        cell.paragraphs[0].paragraph_format.space_after  = Pt(SP)
+    cl.paragraphs[0].paragraph_format.space_before = Pt(SP)
+    cr.paragraphs[0].paragraph_format.space_before = Pt(SP)
+    cl.paragraphs[0].paragraph_format.space_after  = Pt(SP)
+    cr.paragraphs[0].paragraph_format.space_after  = Pt(SP)
 
     return tbl
 
@@ -455,9 +480,10 @@ if st.session_state.original_ai_output:
                 # SUMMARY
                 # ════════════════════════════════════════════════════════════
                 elif is_summ:
-                    p = doc.add_paragraph(line)
+                    p = doc.add_paragraph()
                     p.paragraph_format.space_before = Pt(0)
                     p.paragraph_format.space_after  = Pt(SP)
+                    _base_run(p, sentence_case(line), bold=False)
                     i += 1
 
                 # ════════════════════════════════════════════════════════════
