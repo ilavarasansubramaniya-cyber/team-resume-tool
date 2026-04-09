@@ -6,9 +6,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 from groq import Groq
 import os
-from PIL import Image 
 
-# --- 1. Grand UI Config ---
+# --- 1. UI Config ---
 st.set_page_config(page_title="ResumePro Elite", layout="wide", page_icon="💎")
 
 st.markdown("""
@@ -16,14 +15,13 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
     html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
     .main { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
-    [data-testid="stSidebar"] { background-color: rgba(255, 255, 255, 0.4); backdrop-filter: blur(10px); border-right: 1px solid rgba(255, 255, 255, 0.2); }
-    .stButton>button { width: 100%; border-radius: 12px; height: 3.5em; background: linear-gradient(45deg, #007bff, #6610f2); color: white; font-weight: bold; border: none; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3); }
-    .stDownloadButton>button { width: 100%; border-radius: 12px; height: 3.5em; background: linear-gradient(45deg, #28a745, #20c997); color: white; border: none; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3); }
-    div[data-testid="stExpander"] { background: white; border-radius: 15px; border: none; box-shadow: 0 10px 30px rgba(0,0,0,0.05); margin-bottom: 20px; }
+    [data-testid="stSidebar"] { background-color: rgba(255, 255, 255, 0.4); backdrop-filter: blur(10px); }
+    .stButton>button { width: 100%; border-radius: 12px; height: 3.5em; background: linear-gradient(45deg, #007bff, #6610f2); color: white; font-weight: bold; border: none; }
+    .stDownloadButton>button { width: 100%; border-radius: 12px; height: 3.5em; background: linear-gradient(45deg, #28a745, #20c997); color: white; border: none; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. Groq Configuration ---
+# --- 2. Groq Config ---
 try:
     client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 except Exception as e:
@@ -32,11 +30,9 @@ except Exception as e:
 if 'original_ai_output' not in st.session_state:
     st.session_state.original_ai_output = ""
 
-# --- 3. Sidebar Control Center ---
+# --- 3. Sidebar ---
 with st.sidebar:
     st.markdown("# 💎 Elite Control")
-    st.write("🚀 Llama 4 Scout Engine")
-    
     with st.expander("🏢 BRANDING & IDENTITY", expanded=True):
         company_choice = st.selectbox("Select Template", ["W3G", "Synectics", "ProTouch"])
         contact_number = st.text_input("Contact Number", value="123-456-7890")
@@ -44,7 +40,7 @@ with st.sidebar:
     
     with st.expander("🧠 AI ENGINE SETTINGS", expanded=True):
         include_summary = st.checkbox("Develop Executive Summary", value=True)
-        custom_summary_points = st.text_area("Custom Points to Develop", placeholder="e.g. Focus on leadership...", disabled=not include_summary)
+        custom_summary_points = st.text_area("Custom Points to Develop", placeholder="e.g. Focus on leadership...")
         make_confidential = st.checkbox("Anonymize Employers [CONFIDENTIAL]", value=False)
 
 # --- 4. Helper Functions ---
@@ -80,33 +76,33 @@ def replace_placeholder_in_doc(doc, placeholder, replacement):
                         for run in p.runs: run.text = run.text.replace(placeholder, replacement)
     return found
 
-# --- 5. Main UI & AI Call ---
+# --- 5. Main AI Processing ---
 st.title("Professional Resume Artisan")
-
 uploaded_file = st.file_uploader("Upload Source Resume", type=["pdf", "docx"])
-generate_btn = st.button("✨ START AI TRANSFORMATION")
 
-if uploaded_file and generate_btn:
-    with st.status("🚀 Processing with Llama 4 Scout...", expanded=True) as status:
+if uploaded_file and st.button("✨ START AI TRANSFORMATION"):
+    with st.status("🚀 Processing with Llama 4 Scout...", expanded=True):
         try:
-            sum_p = "DO NOT generate a summary."
-            if include_summary:
-                sum_p = f"ALWAYS generate a 'SUMMARY:' section. Develop these points into a narrative: '{custom_summary_points}'"
+            summary_instruction = f"Create a 'SUMMARY:' section based on: {custom_summary_points}" if include_summary else "No summary."
             
-            priv_p = ""
+            # AGGRESSIVE REDACTION PROMPT
+            redaction_instruction = ""
             if make_confidential:
-                priv_p = "MANDATORY: Anonymize the resume. Replace every single occurrence of an employer or company name with exactly '[CONFIDENTIAL]'. Do not show any company names."
+                redaction_instruction = """
+                CRITICAL INSTRUCTION: You MUST redact all employer/company names. 
+                Replace 'HEDLEY INTERNATIONAL', 'UK HOTEL HOLDINGS', and ANY other company name with exactly '[CONFIDENTIAL]'.
+                If you see a name like 'UK HOTEL HOLDINGS, FZC, EMIRATES', change it to '[CONFIDENTIAL], EMIRATES'.
+                DO NOT LEAVE ANY COMPANY NAMES IN THE OUTPUT.
+                """
 
             system_prompt = f"""
-            You are an elite Resume Architect. Reformat the provided text exactly as follows:
+            {redaction_instruction}
+            Format the resume text provided by the user.
             1. Headers: ALL CAPS ending with a colon (e.g., EXPERIENCE:).
-            2. {sum_p}
-            3. {priv_p}
-            4. Work/Education Line 1: 'Company or University | Date Range'.
-            5. Work/Education Line 2: The Job Title or Degree.
-            6. CRITICAL: Use the '|' symbol ONLY for the Date Range line.
-            7. For Skills and Certifications: List each item on a new line.
-            8. NO markdown bolding (**) or numbering.
+            2. {summary_instruction}
+            3. Experience/Education Line 1: 'Company/University | Date Range'.
+            4. Experience/Education Line 2: The Job Title or Degree.
+            5. Bullet points: DO NOT use markdown symbols. Just list the responsibility lines.
             """
             
             if uploaded_file.type == "application/pdf":
@@ -114,88 +110,73 @@ if uploaded_file and generate_btn:
             else:
                 raw_text = "\n".join([p.text for p in docx.Document(uploaded_file).paragraphs])
             
-            chat_completion = client.chat.completions.create(
+            response = client.chat.completions.create(
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": raw_text}],
                 model="meta-llama/llama-4-scout-17b-16e-instruct",
-                temperature=0.1,
+                temperature=0.1
             )
-            
-            st.session_state.original_ai_output = chat_completion.choices[0].message.content.replace("**", "")
-            status.update(label="Complete!", state="complete")
+            st.session_state.original_ai_output = response.choices[0].message.content.replace("**", "")
         except Exception as e:
             st.error(f"API Error: {e}")
 
-# --- 6. Editor & Export Logic ---
+# --- 6. Document Generation ---
 if st.session_state.original_ai_output:
-    st.markdown("---")
-    content_dict = get_sections_dict(st.session_state.original_ai_output)
+    final_text = st.text_area("Final Polish:", value=st.session_state.original_ai_output, height=400)
     
-    with st.sidebar:
-        with st.expander("🔄 DYNAMIC JUMBLE", expanded=True):
-            header_order = st.multiselect("Reorder Sections:", options=list(content_dict.keys()), default=list(content_dict.keys()))
-
-    final_text = st.text_area("Final Polish:", value=st.session_state.original_ai_output, height=450)
-    
-    # Building the DOCX
     t_map = {"W3G": "w3g_template.docx", "Synectics": "synectics_template.docx", "ProTouch": "protouch_template.docx"}
     t_path = os.path.join(os.path.dirname(__file__), t_map.get(company_choice, ""))
     doc = docx.Document(t_path) if os.path.exists(t_path) else docx.Document()
     set_arial_font(doc)
 
-    # 1. Handle Missing Title
-    title_found = replace_placeholder_in_doc(doc, "[DOCUMENT_TITLE]", document_title.upper())
-    if not title_found:
-        t_para = doc.add_paragraph()
-        t_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        t_run = t_para.add_run(document_title.upper())
+    # Place Document Title at the top
+    if not replace_placeholder_in_doc(doc, "[DOCUMENT_TITLE]", document_title.upper()):
+        t_p = doc.add_paragraph()
+        t_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        t_run = t_p.add_run(document_title.upper())
         t_run.bold, t_run.font.size = True, Pt(16)
 
     replace_placeholder_in_doc(doc, "[CONTACT_NUMBER]", contact_number)
 
-    # 2. Re-establish Bullet Points Logic
-    bullet_headers = ["SKILL", "TOOL", "CERTIFICATION", "TECHNICAL"]
-    new_content = get_sections_dict(final_text)
+    content_dict = get_sections_dict(final_text)
+    header_order = st.multiselect("Reorder Sections:", options=list(content_dict.keys()), default=list(content_dict.keys()))
 
     for h in header_order:
-        if h in new_content:
-            hp = doc.add_paragraph()
-            hp.paragraph_format.space_before = Pt(12)
-            hr = hp.add_run(h)
-            hr.bold, hr.font.size = True, Pt(12)
-            
-            last_comp = False
-            for line in new_content[h]:
-                # Bullet Logic
-                if any(bh in h for bh in bullet_headers):
-                    p_b = doc.add_paragraph(f"• {line.lstrip('*-• ')}")
-                    p_b.paragraph_format.left_indent = Inches(0.25)
-                    p_b.paragraph_format.space_after = Pt(0)
-                
-                # Table Logic (Date ranges)
-                elif "|" in line:
-                    doc.add_paragraph().paragraph_format.space_before = Pt(8)
-                    tbl = doc.add_table(rows=1, cols=2)
-                    tbl.autofit = False
-                    cl, cr = tbl.rows[0].cells[0], tbl.rows[0].cells[1]
-                    cl.width, cr.width = Inches(5.0), Inches(2.0)
-                    parts = line.split("|")
-                    cl.paragraphs[0].add_run(parts[0].strip().upper()).bold = True
-                    p_dt = cr.paragraphs[0]
-                    p_dt.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                    rd = p_dt.add_run(parts[-1].strip())
-                    rd.italic, rd.font.size = True, Pt(10)
-                    last_comp = True
-                
-                # Body Text Logic
-                else:
-                    pb = doc.add_paragraph()
-                    if last_comp:
-                        pb.add_run(line.title()).bold = False
-                        pb.paragraph_format.space_after = Pt(8)
-                        last_comp = False
-                    else:
-                        pb.add_run(line)
-                        pb.paragraph_format.space_after = Pt(4)
+        hp = doc.add_paragraph()
+        hp.paragraph_format.space_before = Pt(14)
+        hp.add_run(h).bold = True
+        
+        is_experience = any(x in h for x in ["EXPERIENCE", "WORK", "HISTORY", "EMPLOYMENT"])
+        last_was_header_line = False # Tracking the 'Company | Date' line
+        last_was_title_line = False  # Tracking the 'Job Title' line
+
+        for line in content_dict[h]:
+            if "|" in line:
+                tbl = doc.add_table(rows=1, cols=2)
+                tbl.autofit = False
+                cl, cr = tbl.rows[0].cells[0], tbl.rows[0].cells[1]
+                cl.width, cr.width = Inches(5.0), Inches(2.0)
+                parts = line.split("|")
+                cl.paragraphs[0].add_run(parts[0].strip().upper()).bold = True
+                p_dt = cr.paragraphs[0]
+                p_dt.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                p_dt.add_run(parts[-1].strip()).italic = True
+                last_was_header_line = True
+            elif last_was_header_line:
+                # This is the Job Title
+                p = doc.add_paragraph()
+                p.add_run(line.strip().title())
+                p.paragraph_format.space_after = Pt(4)
+                last_was_header_line = False
+                last_was_title_line = True
+            elif is_experience and not (last_was_header_line or last_was_title_line):
+                # These are job responsibilities (Bullets)
+                p = doc.add_paragraph(f"• {line.strip()}", style='List Bullet')
+                p.paragraph_format.left_indent = Inches(0.25)
+                p.paragraph_format.space_after = Pt(2)
+            else:
+                # Normal paragraph (Summary, etc.)
+                doc.add_paragraph(line.strip())
+                last_was_title_line = False
 
     buf = io.BytesIO()
     doc.save(buf)
