@@ -297,7 +297,7 @@ def _make_two_col_table(doc, total_dxa=10080, date_dxa=2160):
     tbl.autofit = False
 
     # ── Fixed table layout — prevents Word redistributing column widths ───
-    tblPr = tbl._tbl.get_or_add_tblPr()
+    tblPr = tbl._tbl.tblPr
 
     tblLayout = _OE("w:tblLayout")
     tblLayout.set(_qn("w:type"), "fixed")
