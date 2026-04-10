@@ -133,67 +133,61 @@ def get_sections_dict(text: str) -> dict:
 
 def _replace_in_para(p, targets: dict):
     """
-    Replace tokens inside a paragraph at run level so that template
-    formatting (font, bold, colour etc.) is fully preserved.
-    Also handles the case where a token is split across adjacent runs
-    by first joining all run text, checking for the token, then
-    redistributing the replaced text back into the first run and
-    clearing the rest.
+    Replace tokens inside a paragraph preserving run formatting.
+    Always merges all run text first so split tokens like
+    '[' + 'CONTACT_NUMBER' + ']' are found and replaced correctly.
+    The replaced text is put into the first run; other runs are cleared.
     """
-    # Fast path: no token present at all
+    if not p.runs:
+        return
+
     full_text = "".join(r.text for r in p.runs)
     if not any(tok in full_text for tok in targets):
         return
 
+    # Apply all replacements to the merged text
+    new_text = full_text
     for token, val in targets.items():
-        if token not in full_text:
-            continue
+        new_text = new_text.replace(token, val)
 
-        # Try simple single-run replacement first (most common case)
-        replaced = False
-        for run in p.runs:
-            if token in run.text:
-                run.text = run.text.replace(token, val)
-                replaced = True
+    if new_text == full_text:
+        return  # nothing changed
 
-        if not replaced:
-            # Token is split across multiple runs — merge, replace, redistribute
-            full_text = "".join(r.text for r in p.runs)
-            new_text  = full_text.replace(token, val)
-            # Put everything in the first run, blank the rest
-            if p.runs:
-                p.runs[0].text = new_text
-                for run in p.runs[1:]:
-                    run.text = ""
-        # Refresh full_text for next token
-        full_text = "".join(r.text for r in p.runs)
+    # Put the replaced text in the first run, clear the rest
+    p.runs[0].text = new_text
+    for run in p.runs[1:]:
+        run.text = ""
 
 
 def replace_all_placeholders(doc, contact: str, title: str, name: str):
     """
     Replace [CONTACT_NUMBER], [DOCUMENT_TITLE] and [NAME] everywhere in the
-    document — headers, footers, body paragraphs, and table cells — while
-    preserving all run-level formatting in the template.
+    document — headers, footers (including tables within them), body
+    paragraphs, and body tables — preserving all run-level formatting.
     """
     targets = {
         "[CONTACT_NUMBER]": contact,
         "[DOCUMENT_TITLE]": title,
         "[NAME]":           name,
     }
-    # Headers & footers
+
+    def scan_part(part):
+        """Scan all paragraphs and tables (recursively) in a doc part."""
+        for p in part.paragraphs:
+            _replace_in_para(p, targets)
+        for table in part.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        _replace_in_para(p, targets)
+
+    # Headers & footers (including tables inside them)
     for section in doc.sections:
         for part in [section.header, section.footer]:
-            for p in part.paragraphs:
-                _replace_in_para(p, targets)
-    # Body paragraphs
-    for p in doc.paragraphs:
-        _replace_in_para(p, targets)
-    # Table cells
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in cell.paragraphs:
-                    _replace_in_para(p, targets)
+            scan_part(part)
+
+    # Main body
+    scan_part(doc)
 
 
 # ── Section-type detectors ────────────────────────────────────────────────────
@@ -571,17 +565,27 @@ if st.session_state.original_ai_output:
 
         replace_all_placeholders(doc, contact_number, document_name, document_name)
 
-        # ── DOCUMENT TITLE  (bold, ALL CAPS, centred, top of page 1) ─────────
-        # Shows whatever is typed in the Name field — nothing if left blank
-        if document_name.strip():
-            title_p = doc.add_paragraph()
-            title_p.alignment                     = WD_ALIGN_PARAGRAPH.CENTER
-            title_p.paragraph_format.space_before = Pt(0)
-            title_p.paragraph_format.space_after  = Pt(SP * 2)
-            t_run = title_p.add_run(document_name.strip().upper())
-            t_run.bold      = True
-            t_run.font.name = "Arial"
-            t_run.font.size = Pt(14)
+        # ── CLEAR EMPTY TEMPLATE BODY PARAGRAPHS ─────────────────────────────
+        # The template body contains placeholder empty paragraphs that push
+        # content to mid-page. Remove every trailing empty paragraph from the
+        # body so resume content starts immediately after the template header.
+        from docx.oxml.ns import qn as _qn
+        body = doc.element.body
+        # Remove empty paragraphs at the END of the body (before sectPr)
+        # We keep going until we hit a non-empty paragraph or a table.
+        while True:
+            # Last child before sectPr
+            children = [c for c in body if c.tag != _qn('w:sectPr')]
+            if not children:
+                break
+            last = children[-1]
+            # If it's a paragraph with no text content, remove it
+            if last.tag == _qn('w:p'):
+                text = "".join(t.text or "" for t in last.iter(_qn('w:t')))
+                if not text.strip():
+                    body.remove(last)
+                    continue
+            break
 
         # ── SECTION LOOP ──────────────────────────────────────────────────────
         for h in header_order:
