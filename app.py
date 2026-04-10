@@ -332,22 +332,10 @@ generate_btn  = st.button("✨ START AI TRANSFORMATION")
 if uploaded_file and generate_btn:
     with st.status("🛠️ Re-architecting Content...", expanded=True):
         try:
-            model  = genai.GenerativeModel(MODEL_NAME)
-            sum_p  = f"Generate 'SUMMARY:' using: {custom_points}" if include_summary else "No summary."
-            priv_p = "CRITICAL: Replace employer names with '[CONFIDENTIAL]'." if make_confidential else ""
+            model = genai.GenerativeModel(MODEL_NAME)
 
-            prompt = f"""
-            TASK: Reformat this resume exactly as instructed.
-            - Section headers: ALL CAPS ending in colon (e.g. EXPERIENCE:).
-            - Use EXPERIENCE: (not Experience/Education) for work history.
-            - {sum_p}
-            - {priv_p}
-            - Experience: 'Company | Date Range' on one line, THEN job title on the very next line.
-            - Education: 'Degree | Date Range' on one line, THEN institution on the very next line.
-            - All descriptions: bullet points starting with •
-            - No mention of 'Table' or 'Software' artifacts.
-            """
-
+            # ── Extract raw content from file ────────────────────────────────
+            st.write("📄 Reading resume...")
             if uploaded_file.type == "application/pdf":
                 raw = "".join([p.extract_text() for p in PyPDF2.PdfReader(uploaded_file).pages])
             elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
@@ -355,11 +343,104 @@ if uploaded_file and generate_btn:
             else:
                 raw = Image.open(uploaded_file)
 
-            response = model.generate_content(
-                [prompt, raw] if not isinstance(raw, str)
-                else [prompt, f"TEXT:\n{raw}"]
+            # ── STAGE 1: AI reads and deeply understands the resume ──────────
+            # This call analyses the resume structure, identifies every section,
+            # cleans noise, and strips ALL personal contact details before
+            # anything else happens. The output of this stage becomes the input
+            # for stage 2 — so stage 2 never even sees the contact data.
+            st.write("🧠 Understanding resume structure...")
+
+            understanding_prompt = """
+            You are a professional resume analyst. Your job is to deeply read and
+            understand the resume provided, then produce a clean structured summary
+            of its content ready for reformatting.
+
+            STRICT RULES — follow every one without exception:
+
+            REMOVE COMPLETELY (do not include anywhere in your output):
+            - Candidate full name
+            - Phone numbers (any format)
+            - Email addresses
+            - LinkedIn URLs or profile links
+            - Any website, portfolio, GitHub, or social media links
+            - Home address, city, state, zip, country of residence
+            - Any line that is solely contact or personal identification info
+
+            KEEP AND STRUCTURE:
+            - Professional summary or objective (if present)
+            - All work experience entries with company, date range, job title,
+              and description bullets
+            - All education entries with degree, institution, date
+            - Skills, tools, certifications, and any other professional sections
+
+            OUTPUT FORMAT — return a clean plain-text structured resume with:
+            - Section headers in ALL CAPS ending with a colon (e.g. SUMMARY:)
+            - Use EXPERIENCE: for work history (never 'Experience/Education')
+            - Each experience entry: Company | Date Range on one line,
+              job title on the very next line, then bullet points
+            - Each education entry: Degree | Date on one line,
+              institution on the very next line
+            - Bullet points starting with •
+            - No markdown, no asterisks, no bold markers, no table artifacts,
+              no mention of 'Software' or 'Table' as content
+            - No contact details of any kind anywhere in the output
+
+            Now read and understand this resume thoroughly, then output the
+            clean structured version:
+            """
+
+            stage1_response = model.generate_content(
+                [understanding_prompt, raw] if not isinstance(raw, str)
+                else [understanding_prompt, f"RESUME TEXT:\n{raw}"]
             )
-            st.session_state.original_ai_output = response.text.replace("**", "")
+            understood_resume = stage1_response.text.replace("**", "").strip()
+
+            # ── STAGE 2: AI reformats based on its understanding ─────────────
+            # At this point contact details are already gone. Stage 2 focuses
+            # purely on formatting quality — summary, confidentiality, structure.
+            st.write("✨ Reformatting with AI...")
+
+            sum_p  = (
+                f"Generate or improve a professional SUMMARY: section using "
+                f"these focus points: {custom_points}. "
+                f"If no focus points given, craft a strong executive summary "
+                f"from the candidate's experience."
+            ) if include_summary else "Do not add or modify any SUMMARY section."
+
+            priv_p = (
+                "CRITICAL PRIVACY RULE: Replace ALL employer/company names "
+                "with '[CONFIDENTIAL]'. This applies to every experience entry."
+            ) if make_confidential else ""
+
+            reformat_prompt = f"""
+            You are a professional resume formatter. You have been given a
+            pre-analysed resume with contact details already removed.
+            Your job is ONLY to refine the formatting and content quality.
+
+            RULES:
+            - {sum_p}
+            - {priv_p}
+            - Keep ALL section headers in ALL CAPS ending with colon
+            - Keep the exact structure: Company | Date Range on one line,
+              job title on the next line, then bullet points beneath
+            - Keep education structure: Degree | Date on one line,
+              institution on the next line
+            - Improve bullet point wording to be strong, action-oriented,
+              and results-focused where possible
+            - Do NOT add any contact details, names, emails, phones,
+              or links back in — they have been intentionally removed
+            - Do NOT add any markdown formatting, asterisks, or bold markers
+            - Do NOT invent or fabricate any experience or qualifications
+            - Return only the final clean resume text, nothing else
+
+            RESUME TO REFORMAT:
+            {understood_resume}
+            """
+
+            stage2_response = model.generate_content(reformat_prompt)
+            st.session_state.original_ai_output = stage2_response.text.replace("**", "").strip()
+            st.write("✅ Done!")
+
         except Exception as e:
             st.error(f"System Error: {e}")
 
