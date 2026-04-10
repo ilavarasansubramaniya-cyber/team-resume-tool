@@ -308,24 +308,25 @@ def is_company_date_line(line: str) -> bool:
     return False
 
 
-def _make_two_col_table(doc, total_dxa=8510, date_dxa=2200):
+def _make_two_col_table(doc, total_dxa=8510, date_dxa=2520):
     """
     Invisible 2-column fixed-layout table.
-    A4 page 11910 DXA wide, margins 1700 each side → body = 8510 DXA.
-    date_dxa=2200 fits 'Sep 2020 - Present' at 10.5pt comfortably.
+    A4 body = 8510 DXA. date_dxa=2520 (1.75") safely fits the longest
+    date 'Sep 2020 - Present' at 10.5pt Arial including default cell margins.
+    Cell margins are explicitly zeroed so no hidden padding eats into the
+    date column and causes wrapping.
     """
     from docx.oxml.ns import qn as _qn
     from docx.oxml import OxmlElement as _OE
 
     content_dxa = total_dxa - date_dxa
 
-    # Use rows=2 so python-docx creates valid row XML natively
     tbl = doc.add_table(rows=2, cols=2)
     tbl.autofit = False
 
     tblPr = tbl._tbl.tblPr
 
-    # Fixed layout — Word must honour our explicit widths
+    # Fixed layout — Word must honour explicit widths
     tblLayout = _OE("w:tblLayout")
     tblLayout.set(_qn("w:type"), "fixed")
     tblPr.append(tblLayout)
@@ -336,6 +337,15 @@ def _make_two_col_table(doc, total_dxa=8510, date_dxa=2200):
         tblW = _OE("w:tblW"); tblPr.append(tblW)
     tblW.set(_qn("w:w"),    str(total_dxa))
     tblW.set(_qn("w:type"), "dxa")
+
+    # Zero out default cell margins so no hidden padding shrinks the date cell
+    tblCellMar = _OE("w:tblCellMar")
+    for side in ("top", "left", "bottom", "right"):
+        m = _OE(f"w:{side}")
+        m.set(_qn("w:w"),    "0")
+        m.set(_qn("w:type"), "dxa")
+        tblCellMar.append(m)
+    tblPr.append(tblCellMar)
 
     # Remove all borders
     tblBorders = _OE("w:tblBorders")
@@ -353,7 +363,6 @@ def _make_two_col_table(doc, total_dxa=8510, date_dxa=2200):
     for dxa in (content_dxa, date_dxa):
         gc = _OE("w:gridCol"); gc.set(_qn("w:w"), str(dxa))
         tblGrid.append(gc)
-    # Insert tblGrid right after tblPr (index 0)
     tbl._tbl.insert(list(tbl._tbl).index(tblPr) + 1, tblGrid)
 
     # Lock all cell widths explicitly
@@ -377,10 +386,7 @@ def _lock_cell(cell, dxa):
 
 
 def _no_wrap_cell(cell):
-    """
-    Prevent cell content from wrapping onto a second line.
-    Applied to every date cell so the date stays on one line always.
-    """
+    """Prevent cell content wrapping. Set BEFORE adding text."""
     from docx.oxml.ns import qn as _qn
     from docx.oxml import OxmlElement as _OE
     tcPr = cell._tc.get_or_add_tcPr()
@@ -391,11 +397,12 @@ def _no_wrap_cell(cell):
 def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
     """
     2-row fixed-layout table:
-      Row 1: COMPANY (bold UPPER)  |  Date (italic, LEFT-aligned, no-wrap)
-      Row 2: Job title (bold)      |  [empty, no-wrap]
+      Row 1: COMPANY (bold UPPER, left)  |  Date (italic, RIGHT-aligned, no-wrap)
+      Row 2: Job title (bold, left)      |  [empty, no-wrap]
+    Date is RIGHT-aligned so all dates end at the same right margin.
     """
     TOTAL = 8510
-    DATE  = 2200
+    DATE  = 2520    # 1.75" — safely fits longest date at 10.5pt with zero margins
     CONT  = TOTAL - DATE
 
     tbl, _, _ = _make_two_col_table(doc, total_dxa=TOTAL, date_dxa=DATE)
@@ -405,9 +412,9 @@ def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
     # noWrap BEFORE adding text
     _no_wrap_cell(r0c1); _no_wrap_cell(r1c1)
 
-    # Row 1: Company | Date
+    # Row 1: Company | Date (RIGHT-aligned)
     _base_run(r0c0.paragraphs[0], company_part.strip().upper(), bold=True)
-    r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+    r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
 
     # Row 2: Job title | empty
@@ -427,11 +434,11 @@ def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
 def add_education_row(doc, degree_part: str, date_part: str, institution: str = ""):
     """
     2-row fixed-layout table (same widths as experience so dates align):
-      Row 1: DEGREE (ALL CAPS bold)            |  Date (italic, LEFT, no-wrap)
+      Row 1: DEGREE (ALL CAPS bold, left)      |  Date (italic, RIGHT-aligned, no-wrap)
       Row 2: Institution (sentence case unbold) |  [empty, no-wrap]
     """
     TOTAL = 8510
-    DATE  = 2200
+    DATE  = 2520
     CONT  = TOTAL - DATE
 
     tbl, _, _ = _make_two_col_table(doc, total_dxa=TOTAL, date_dxa=DATE)
@@ -441,9 +448,9 @@ def add_education_row(doc, degree_part: str, date_part: str, institution: str = 
     # noWrap BEFORE adding text
     _no_wrap_cell(r0c1); _no_wrap_cell(r1c1)
 
-    # Row 1: Degree ALL CAPS | Date italic LEFT
+    # Row 1: Degree ALL CAPS | Date italic RIGHT-aligned
     _base_run(r0c0.paragraphs[0], degree_part.strip().upper(), bold=True)
-    r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+    r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
 
     r0c0.paragraphs[0].paragraph_format.space_before = Pt(4)
@@ -451,7 +458,6 @@ def add_education_row(doc, degree_part: str, date_part: str, institution: str = 
     r0c1.paragraphs[0].paragraph_format.space_before = Pt(4)
     r0c1.paragraphs[0].paragraph_format.space_after  = Pt(2)
 
-    # Row 2: Institution | empty  (only written if institution provided)
     if institution:
         _base_run(r1c0.paragraphs[0], sentence_case(institution.strip()), bold=False)
         r1c0.paragraphs[0].paragraph_format.space_before = Pt(0)
@@ -459,13 +465,82 @@ def add_education_row(doc, degree_part: str, date_part: str, institution: str = 
         r1c1.paragraphs[0].paragraph_format.space_before = Pt(0)
         r1c1.paragraphs[0].paragraph_format.space_after  = Pt(SP)
     else:
-        # No institution — collapse row 2 to zero height
         r1c0.paragraphs[0].paragraph_format.space_before = Pt(0)
         r1c0.paragraphs[0].paragraph_format.space_after  = Pt(0)
         r1c1.paragraphs[0].paragraph_format.space_before = Pt(0)
         r1c1.paragraphs[0].paragraph_format.space_after  = Pt(0)
 
     return tbl
+
+
+def move_watermark_to_header(doc):
+    """
+    The template watermark/logo is a floating image anchored in the body —
+    it only appears on page 1. This function copies the anchor XML into the
+    header so it repeats on every page, then removes it from the body.
+    The header already exists (it contains the line graphic and textbox).
+    """
+    from docx.oxml.ns import qn as _qn
+    import copy
+
+    W_P      = _qn("w:p")
+    W_R      = _qn("w:r")
+    W_DRAW   = _qn("w:drawing")
+    WP_ANCHOR= "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}anchor"
+    A_BLIP   = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+    R_EMBED  = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
+
+    body = doc.element.body
+
+    # Find the paragraph in the body that contains the watermark drawing
+    watermark_para = None
+    watermark_rId  = None
+    for para in body.iter(W_P):
+        draw = para.find(f".//{W_DRAW}")
+        if draw is not None:
+            anchor = draw.find(WP_ANCHOR)
+            if anchor is not None:
+                blip = anchor.find(f".//{A_BLIP}")
+                if blip is not None:
+                    watermark_rId  = blip.get(R_EMBED)
+                    watermark_para = para
+                    break
+
+    if watermark_para is None or watermark_rId is None:
+        return  # nothing to move
+
+    # Copy the watermark paragraph XML into the header
+    section   = doc.sections[0]
+    header    = section.header
+    hdr_elem  = header._element
+
+    watermark_copy = copy.deepcopy(watermark_para)
+    # Insert before the last paragraph in the header
+    hdr_paras = hdr_elem.findall(W_P)
+    if hdr_paras:
+        hdr_elem.insert(list(hdr_elem).index(hdr_paras[-1]), watermark_copy)
+    else:
+        hdr_elem.append(watermark_copy)
+
+    # Add the image relationship to the header's relationship part
+    # so the rId resolves correctly in the header context
+    header_part = header.part
+    doc_part    = doc.part
+    # Find the image part via the doc relationship
+    try:
+        img_part = doc_part.related_parts[watermark_rId]
+        new_rId  = header_part.relate_to(
+            img_part,
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+        )
+        # Update the rEmbed in the copy to use the new rId
+        for blip in watermark_copy.iter(A_BLIP):
+            blip.set(R_EMBED, new_rId)
+    except Exception:
+        pass  # if relationship copy fails, watermark still shows from body
+
+    # Remove the watermark from the body so it doesn't double-show on page 1
+    body.remove(watermark_para)
 
 
 def set_keep_with_next(paragraph):
@@ -764,22 +839,22 @@ if st.session_state.original_ai_output:
 
         replace_all_placeholders(doc, contact_number, document_name, document_name)
 
+        # ── MOVE WATERMARK TO HEADER (repeats on every page) ──────────────────
+        # The template watermark is in the body (page 1 only). Moving it to the
+        # header makes it appear on every page automatically.
+        move_watermark_to_header(doc)
+
         # ── CLEAR EMPTY TEMPLATE BODY PARAGRAPHS (preserve drawings) ─────────
-        # The template body has empty placeholder paragraphs that push content
-        # down. Remove them BUT keep any paragraph that contains a drawing
-        # (the watermark/logo image embedded in the body).
         from docx.oxml.ns import qn as _qn
         body = doc.element.body
         W_DRAWING = _qn("w:drawing")
         W_PICT    = _qn("w:pict")
-
         while True:
             children = [c for c in body if c.tag != _qn("w:sectPr")]
             if not children:
                 break
             last = children[-1]
             if last.tag == _qn("w:p"):
-                # Keep if it contains a drawing/image (watermark)
                 has_drawing = (last.find(f".//{W_DRAWING}") is not None or
                                last.find(f".//{W_PICT}")    is not None)
                 text = "".join(t.text or "" for t in last.iter(_qn("w:t")))
@@ -788,10 +863,27 @@ if st.session_state.original_ai_output:
                     continue
             break
 
-        # ── ONE LINE SPACE at top (below the header line) ─────────────────────
-        top_spacer = doc.add_paragraph()
-        top_spacer.paragraph_format.space_before = Pt(0)
-        top_spacer.paragraph_format.space_after  = Pt(12)   # 1 line ≈ 12pt
+        # ── ONE LINE SPACE top & bottom on EVERY page via header/footer ───────
+        # The correct way to get spacing on every page (not just page 1) is to
+        # add space_after to the LAST paragraph of the header (creates gap below
+        # the header line on every page) and space_before to the FIRST paragraph
+        # of the footer (creates gap above the footer line on every page).
+        # The body top_spacer only affects page 1; header/footer spacing is global.
+
+        ONE_LINE = Pt(12)   # 1 line ≈ 12pt
+
+        # Top spacing on every page: pad the last paragraph of the header
+        for section in doc.sections:
+            hdr = section.header
+            if hdr.paragraphs:
+                hdr.paragraphs[-1].paragraph_format.space_after = ONE_LINE
+
+        # Bottom spacing on every page: pad the first paragraph of the footer
+        # WITHOUT touching any text or runs — only paragraph spacing
+        for section in doc.sections:
+            ftr = section.footer
+            if ftr.paragraphs:
+                ftr.paragraphs[0].paragraph_format.space_before = ONE_LINE
 
         # ── SECTION LOOP ──────────────────────────────────────────────────────
         for h in header_order:
@@ -927,14 +1019,7 @@ if st.session_state.original_ai_output:
             # Trailing spacer after every section (uniform)
             add_spacer(doc, before=0, after=SP)
 
-        # ── ONE LINE SPACE at bottom (above the footer line) ──────────────────
-        bottom_spacer = doc.add_paragraph()
-        bottom_spacer.paragraph_format.space_before = Pt(12)  # 1 line ≈ 12pt
-        bottom_spacer.paragraph_format.space_after  = Pt(0)
-
-        # ── PAGE BREAK SPACING ────────────────────────────────────────────────
-        # For every hard page-break run: ensure 1 line before (end of page)
-        # and 1 line after (start of next page).
+        # ── PAGE BREAK hard-break spacing ─────────────────────────────────────
         for p in doc.paragraphs:
             for run in p.runs:
                 for br in run._element.findall(qn("w:br")):
