@@ -82,6 +82,7 @@ with st.sidebar:
     with st.expander("🏢 BRANDING", expanded=True):
         company_choice = st.selectbox("Select Template", ["W3G", "Synectics", "ProTouch"])
         contact_number = st.text_input("Contact Number", value="123-456-7890")
+        document_name  = st.text_input("Name", placeholder="Enter candidate name")
         raw_title      = st.text_input("Document Title", placeholder="Enter Name or Title")
         document_title = raw_title.strip().upper() if raw_title.strip() else "RESUME"
 
@@ -132,9 +133,13 @@ def get_sections_dict(text: str) -> dict:
     return sections
 
 
-def replace_all_placeholders(doc, contact: str, title: str):
-    """Replace [CONTACT_NUMBER] and [DOCUMENT_TITLE] everywhere in the doc."""
-    targets = {"[CONTACT_NUMBER]": contact, "[DOCUMENT_TITLE]": title}
+def replace_all_placeholders(doc, contact: str, title: str, name: str):
+    """Replace [CONTACT_NUMBER], [DOCUMENT_TITLE] and [NAME] everywhere in the doc."""
+    targets = {
+        "[CONTACT_NUMBER]": contact,
+        "[DOCUMENT_TITLE]": title,
+        "[NAME]":           name,
+    }
     for section in doc.sections:
         for part in [section.header, section.footer]:
             for p in part.paragraphs:
@@ -202,6 +207,37 @@ def add_spacer(doc, before=0, after=SP):
 def split_by_pipe(line: str):
     """'A | B | C' → ['A', 'B', 'C']"""
     return [seg.strip() for seg in line.split("|") if seg.strip()]
+
+
+# Date keywords used to distinguish "Company | Date" lines from
+# job titles that happen to contain a pipe character.
+_DATE_KEYWORDS = (
+    "present", "current", "now",
+    "jan", "feb", "mar", "apr", "may", "jun",
+    "jul", "aug", "sep", "oct", "nov", "dec",
+    "january","february","march","april","june","july",
+    "august","september","october","november","december",
+)
+_DATE_DIGITS_RE = __import__("re").compile(r"\b(19|20)\d{2}\b")
+
+
+def is_company_date_line(line: str) -> bool:
+    """
+    Return True only when the part AFTER the last '|' looks like a date range.
+    e.g. 'Acme Corp | Jan 2020 - Present'  → True
+         'Manager | Team Lead'              → False  (job title with pipe)
+         'CPA | Auditing & Accounting'      → False  (education degree with pipe)
+    """
+    if "|" not in line:
+        return False
+    after_last_pipe = line.split("|")[-1].strip().lower()
+    # Contains a 4-digit year (1900-2099) → it's a date
+    if _DATE_DIGITS_RE.search(after_last_pipe):
+        return True
+    # Contains a month name or 'present' → it's a date
+    if any(kw in after_last_pipe for kw in _DATE_KEYWORDS):
+        return True
+    return False
 
 
 def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
@@ -496,7 +532,7 @@ if st.session_state.original_ai_output:
         style.font.name = "Arial"
         style.font.size = Pt(10.5)
 
-        replace_all_placeholders(doc, contact_number, document_title)
+        replace_all_placeholders(doc, contact_number, document_title, document_name)
 
         # ── DOCUMENT TITLE  (bold, ALL CAPS, centred, top of page 1) ─────────
         title_p = doc.add_paragraph()
@@ -541,7 +577,8 @@ if st.session_state.original_ai_output:
                 #   • Never bold
                 # ════════════════════════════════════════════════════════════
                 if is_list:
-                    if "|" in line:
+                    if "|" in line and not is_company_date_line(line):
+                        # '|' = multiple skill items on one line → split into bullets
                         for seg in split_by_pipe(line):
                             add_bullet(doc, sentence_case(seg), bold=False)
                     else:
@@ -556,13 +593,14 @@ if st.session_state.original_ai_output:
                 #   Word never orphans company name on the last line of a page
                 # ════════════════════════════════════════════════════════════
                 elif is_exp:
-                    if "|" in line:
+                    if is_company_date_line(line):
+                        # ── Company | Date row ────────────────────────────────
                         parts       = line.split("|")
                         company_str = parts[0].strip()
                         date_str    = parts[-1].strip()
-                        # Peek ahead for the job title
+                        # Peek ahead for the job title (may itself contain '|')
                         job_title = ""
-                        if i + 1 < len(lines) and "|" not in lines[i + 1]:
+                        if i + 1 < len(lines) and not is_company_date_line(lines[i + 1]):
                             job_title = lines[i + 1]
                             i += 1   # consume the title line
                         # Anchor paragraph — keep_with_next pushes whole block
@@ -573,8 +611,19 @@ if st.session_state.original_ai_output:
                         set_keep_with_next(anchor)
                         add_experience_row(doc, company_str, date_str, job_title)
                     else:
-                        # Job description bullet — sentence case, not bold
-                        add_bullet(doc, sentence_case(line), bold=False)
+                        # Plain line in experience — could be a job title that
+                        # contains '|' (e.g. 'Manager | Team Lead') or a bullet.
+                        # Render as-is: bold if it looks like a title (no bullet
+                        # prefix), otherwise as a bullet.
+                        clean_line = line.lstrip("•*-– ").strip()
+                        if line.startswith(("•", "*", "-", "–")):
+                            add_bullet(doc, sentence_case(clean_line), bold=False)
+                        else:
+                            # Treat as job title / standalone bold line
+                            p = doc.add_paragraph()
+                            p.paragraph_format.space_before = Pt(4)
+                            p.paragraph_format.space_after  = Pt(4)
+                            _base_run(p, sentence_case(line), bold=True)
                     i += 1
 
                 # ════════════════════════════════════════════════════════════
@@ -585,13 +634,13 @@ if st.session_state.original_ai_output:
                 #   vertically aligned and never split across pages.
                 # ════════════════════════════════════════════════════════════
                 elif is_edu:
-                    if "|" in line:
+                    if is_company_date_line(line):
                         parts      = line.split("|")
                         degree_str = parts[0].strip()
                         date_str   = parts[-1].strip()
                         # Peek ahead for institution line
                         institution = ""
-                        if i + 1 < len(lines) and "|" not in lines[i + 1]:
+                        if i + 1 < len(lines) and not is_company_date_line(lines[i + 1]):
                             institution = lines[i + 1]
                             i += 1   # consume institution line
                         # Anchor paragraph keeps whole block together
