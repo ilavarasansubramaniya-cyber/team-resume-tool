@@ -92,8 +92,8 @@ with st.sidebar:
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. Spacing constants  (all uniform — one value rules them all)
 # ─────────────────────────────────────────────────────────────────────────────
-SP = 8          # Pt — the single uniform spacing unit used everywhere
-TWO_LINE_PT = 24  # 2 lines ≈ 24 pt  (page-boundary spacing)
+SP = 6          # Pt — half-line spacing used uniformly everywhere
+TWO_LINE_PT = 24
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. Helper / Logic Functions
@@ -672,8 +672,9 @@ DATE RANGE RULES (critical):
 
 EDUCATION ENTRIES:
   - Line 1: Degree Name | Date  (date only if actually present in the resume)
-  - Line 2: Institution Name  (on its own line below the degree)
-  - If no date: Degree Name | (leave after pipe empty, or omit pipe if no date)
+  - Line 2: Institution Name  (on its own line below the degree — NEVER after the pipe)
+  - NEVER put institution name after the pipe — only a date goes after the pipe
+  - If no date: Degree Name (no pipe at all if there is no date)
 
 CERTIFICATIONS:
   - Certification Name | Date  (if date present)
@@ -684,6 +685,13 @@ BULLETS:
   - Every job description point MUST start with •
   - Never leave a description line without a bullet
   - No bold, no asterisks, no markdown inside bullet text
+
+UNIFORM SPACING (critical — must be consistent throughout):
+  - Separate each job entry from the next with exactly ONE blank line
+  - Separate each education entry from the next with exactly ONE blank line
+  - One blank line before each section header
+  - One blank line after each section header
+  - All sections must have the same visual rhythm — no extra gaps, no missing gaps
 
 GENERAL:
   - No markdown formatting anywhere (no **, no *, no #, no ---)
@@ -873,28 +881,38 @@ return a CORRECTED resume text. Fix violations silently — no explanations.
 RULES TO ENFORCE:
 
 1. SECTION HEADERS: ALL CAPS ending colon, own line. e.g. EXPERIENCE:
+   There must be exactly ONE blank line worth of space before and after
+   each section header — enforce this in the text structure.
 
-2. EXPERIENCE — strict 2-line:
+2. EXPERIENCE — strict 2-line per job:
    Line 1: COMPANY NAME | Mon YYYY - Mon YYYY
-   Line 2: Job Title (alone, never on same line as company)
-   Date must contain ONLY date — NO city/state/location in date column.
+   Line 2: Job Title (alone on its own line, NEVER on same line as company)
+   Date must contain ONLY a date — NO city, state, or location in the date.
+   Each job block must be separated from the next by a consistent gap.
 
-3. EDUCATION — strict 2-line:
-   Line 1: DEGREE NAME | Date   (ONLY date after pipe, nothing else)
-   Line 2: Institution name (alone on its own line)
-   If institution is after the pipe → move it to line 2.
-   If institution and date are mixed → split them correctly.
+3. EDUCATION — strict 2-line per entry:
+   Line 1: DEGREE NAME | Date   (ONLY date after pipe — nothing else)
+   Line 2: Institution name (alone on its own line below the degree)
+   If institution appears after the pipe → move it to line 2.
+   If date and institution are mixed after the pipe → split correctly.
+   Each education entry must be separated from the next by a consistent gap.
 
 4. DATE RANGE: Mon YYYY - Mon YYYY or Mon YYYY - Present or YYYY - YYYY.
-   3-letter months only. No location in date. Blank if no date given.
+   3-letter months only: Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec.
+   No location, city, or state in the date. Blank if no date in original.
 
-5. Every description bullet must start with •. No bold/asterisks/markdown.
+5. SPACING — must be uniform throughout:
+   - Half-line gap (one blank line) between each job/education entry
+   - Half-line gap before and after each section header
+   - All bullets within a section have consistent spacing (no double gaps)
 
-6. No contact info (name, phone, email, address, URL) anywhere.
+6. Every description bullet must start with •. No bold/asterisks/markdown.
 
-7. No markdown (no **, __, *, #headers, --- dividers).
+7. No contact info (name, phone, email, address, URL) anywhere.
 
-Return ONLY the corrected resume text. No preamble.
+8. No markdown (no **, __, *, #headers, --- dividers).
+
+Return ONLY the corrected resume text. No preamble. No commentary.
 
 RESUME:
 {final_text}
@@ -944,38 +962,21 @@ RESUME:
                         continue
                 break
 
-            # ── ONE LINE SPACE top & bottom on EVERY PAGE ─────────────────────
-            # Set via XML spacing on header/footer paragraphs so it applies to
-            # all pages, not just page 1.
-            ONE_LINE = 240   # 240 twentieths-of-a-point = 12pt = 1 line
+            # ── SPACING: 1 line top & bottom on every page ────────────────────
+            # The template header LINE and footer LINE are absolutely-positioned
+            # drawings — changing paragraph spacing inside header/footer does NOT
+            # move them and CORRUPTS the footer address layout.
+            # Correct approach: add 12pt space_before on the FIRST body paragraph
+            # (gap between header line and content) and 12pt space_after on the
+            # LAST body paragraph (gap between content and footer line).
+            # These body paragraphs are added inside the section loop below, so
+            # we track them and set spacing after the loop.
 
-            for section in doc.sections:
-                # TOP: space_after on the last header paragraph
-                hdr = section.header
-                if hdr.paragraphs:
-                    last_hdr = hdr.paragraphs[-1]
-                    pPr = last_hdr._element.get_or_add_pPr()
-                    spacing = pPr.find(_qn("w:spacing"))
-                    if spacing is None:
-                        from docx.oxml import OxmlElement as _OE
-                        spacing = _OE("w:spacing")
-                        pPr.append(spacing)
-                    spacing.set(_qn("w:after"), str(ONE_LINE))
-
-                # BOTTOM: space_before on the first footer paragraph
-                ftr = section.footer
-                if ftr.paragraphs:
-                    first_ftr = ftr.paragraphs[0]
-                    pPr = first_ftr._element.get_or_add_pPr()
-                    spacing = pPr.find(_qn("w:spacing"))
-                    if spacing is None:
-                        from docx.oxml import OxmlElement as _OE
-                        spacing = _OE("w:spacing")
-                        pPr.append(spacing)
-                    # Preserve existing attributes, only set/override 'before'
-                    spacing.set(_qn("w:before"), str(ONE_LINE))
+            ONE_LINE_DXA = 240   # 12pt in twentieths-of-a-point (half-points)
 
             # ── SECTION LOOP ──────────────────────────────────────────────────
+            first_body_para = None   # will be set on very first paragraph added
+
             for h in header_order:
                 if h not in current_sections:
                     continue
@@ -992,6 +993,8 @@ RESUME:
                 hp.paragraph_format.keep_with_next = True
                 set_keep_with_next(hp)
                 _base_run(hp, h, bold=True, size_pt=11)
+                if first_body_para is None:
+                    first_body_para = hp
 
                 lines = current_sections[h]
                 i = 0
@@ -1073,6 +1076,33 @@ RESUME:
                         i += 1
 
                 add_spacer(doc, before=0, after=SP)
+
+            # ── TOP SPACING: 1 line after header line, on every page ──────────
+            # Set space_before on the FIRST body paragraph via XML directly.
+            # This creates a visible gap between the header line and body content
+            # that applies on every page because the header/sectPr repeats.
+            if first_body_para is not None:
+                pPr = first_body_para._element.get_or_add_pPr()
+                spc = pPr.find(_qn("w:spacing"))
+                if spc is None:
+                    from docx.oxml import OxmlElement as _OE2
+                    spc = _OE2("w:spacing"); pPr.append(spc)
+                # Preserve existing after value, set before to ONE_LINE
+                existing_after = spc.get(_qn("w:after"), str(int(SP * 20)))
+                spc.set(_qn("w:before"), str(ONE_LINE_DXA))
+                spc.set(_qn("w:after"),  existing_after)
+
+            # ── BOTTOM SPACING: 1 line before footer line, on every page ──────
+            # Add a final empty paragraph with space_after=12pt.
+            # Do NOT touch the footer — its address boxes use absolute positioning
+            # and any footer paragraph spacing change corrupts their layout.
+            last_para = doc.add_paragraph()
+            pPr = last_para._element.get_or_add_pPr()
+            from docx.oxml import OxmlElement as _OE3
+            spc2 = _OE3("w:spacing")
+            spc2.set(_qn("w:before"), "0")
+            spc2.set(_qn("w:after"),  str(ONE_LINE_DXA))
+            pPr.append(spc2)
 
             # Hard page-break spacing
             for p in doc.paragraphs:
