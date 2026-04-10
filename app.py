@@ -83,8 +83,6 @@ with st.sidebar:
         company_choice = st.selectbox("Select Template", ["W3G", "Synectics", "ProTouch"])
         contact_number = st.text_input("Contact Number", value="123-456-7890")
         document_name  = st.text_input("Name", placeholder="Enter candidate name")
-        raw_title      = st.text_input("Document Title", placeholder="Enter Name or Title")
-        document_title = raw_title.strip().upper() if raw_title.strip() else "RESUME"
 
     with st.expander("🧠 AI ENGINE SETTINGS", expanded=True):
         include_summary  = st.checkbox("Develop Executive Summary", value=True)
@@ -571,17 +569,19 @@ if st.session_state.original_ai_output:
         style.font.name = "Arial"
         style.font.size = Pt(10.5)
 
-        replace_all_placeholders(doc, contact_number, document_title, document_name)
+        replace_all_placeholders(doc, contact_number, document_name, document_name)
 
         # ── DOCUMENT TITLE  (bold, ALL CAPS, centred, top of page 1) ─────────
-        title_p = doc.add_paragraph()
-        title_p.alignment                    = WD_ALIGN_PARAGRAPH.CENTER
-        title_p.paragraph_format.space_before = Pt(0)
-        title_p.paragraph_format.space_after  = Pt(SP * 2)
-        t_run = title_p.add_run(document_title.upper())
-        t_run.bold      = True
-        t_run.font.name = "Arial"
-        t_run.font.size = Pt(14)
+        # Shows whatever is typed in the Name field — nothing if left blank
+        if document_name.strip():
+            title_p = doc.add_paragraph()
+            title_p.alignment                     = WD_ALIGN_PARAGRAPH.CENTER
+            title_p.paragraph_format.space_before = Pt(0)
+            title_p.paragraph_format.space_after  = Pt(SP * 2)
+            t_run = title_p.add_run(document_name.strip().upper())
+            t_run.bold      = True
+            t_run.font.name = "Arial"
+            t_run.font.size = Pt(14)
 
         # ── SECTION LOOP ──────────────────────────────────────────────────────
         for h in header_order:
@@ -733,8 +733,9 @@ if st.session_state.original_ai_output:
 
         buf = io.BytesIO()
         doc.save(buf)
+        file_name = f"{document_name.strip().upper()}.docx" if document_name.strip() else "RESUME.docx"
         st.download_button(
             label=f"📥 DOWNLOAD {company_choice} DOCX",
             data=buf.getvalue(),
-            file_name=f"{document_title}.docx",
+            file_name=file_name,
         )
