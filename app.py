@@ -133,30 +133,69 @@ def get_sections_dict(text: str) -> dict:
     return sections
 
 
+def _replace_in_para(p, targets: dict):
+    """
+    Replace tokens inside a paragraph at run level so that template
+    formatting (font, bold, colour etc.) is fully preserved.
+    Also handles the case where a token is split across adjacent runs
+    by first joining all run text, checking for the token, then
+    redistributing the replaced text back into the first run and
+    clearing the rest.
+    """
+    # Fast path: no token present at all
+    full_text = "".join(r.text for r in p.runs)
+    if not any(tok in full_text for tok in targets):
+        return
+
+    for token, val in targets.items():
+        if token not in full_text:
+            continue
+
+        # Try simple single-run replacement first (most common case)
+        replaced = False
+        for run in p.runs:
+            if token in run.text:
+                run.text = run.text.replace(token, val)
+                replaced = True
+
+        if not replaced:
+            # Token is split across multiple runs — merge, replace, redistribute
+            full_text = "".join(r.text for r in p.runs)
+            new_text  = full_text.replace(token, val)
+            # Put everything in the first run, blank the rest
+            if p.runs:
+                p.runs[0].text = new_text
+                for run in p.runs[1:]:
+                    run.text = ""
+        # Refresh full_text for next token
+        full_text = "".join(r.text for r in p.runs)
+
+
 def replace_all_placeholders(doc, contact: str, title: str, name: str):
-    """Replace [CONTACT_NUMBER], [DOCUMENT_TITLE] and [NAME] everywhere in the doc."""
+    """
+    Replace [CONTACT_NUMBER], [DOCUMENT_TITLE] and [NAME] everywhere in the
+    document — headers, footers, body paragraphs, and table cells — while
+    preserving all run-level formatting in the template.
+    """
     targets = {
         "[CONTACT_NUMBER]": contact,
         "[DOCUMENT_TITLE]": title,
         "[NAME]":           name,
     }
+    # Headers & footers
     for section in doc.sections:
         for part in [section.header, section.footer]:
             for p in part.paragraphs:
-                for token, val in targets.items():
-                    if token in p.text:
-                        p.text = p.text.replace(token, val)
+                _replace_in_para(p, targets)
+    # Body paragraphs
     for p in doc.paragraphs:
-        for token, val in targets.items():
-            if token in p.text:
-                p.text = p.text.replace(token, val)
+        _replace_in_para(p, targets)
+    # Table cells
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    for token, val in targets.items():
-                        if token in p.text:
-                            p.text = p.text.replace(token, val)
+                    _replace_in_para(p, targets)
 
 
 # ── Section-type detectors ────────────────────────────────────────────────────
@@ -312,13 +351,13 @@ def add_education_row(doc, degree_part: str, date_part: str, institution: str = 
 
     # Row 1 left — Degree bold, sentence case
     _base_run(r0c0.paragraphs[0], sentence_case(degree_part.strip()), bold=True)
-    r0c0.paragraphs[0].paragraph_format.space_before = Pt(SP)
+    r0c0.paragraphs[0].paragraph_format.space_before = Pt(4)   # half-line between edu entries
     r0c0.paragraphs[0].paragraph_format.space_after  = Pt(2)
 
     # Row 1 right — Date italic, right-aligned
     r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
-    r0c1.paragraphs[0].paragraph_format.space_before = Pt(SP)
+    r0c1.paragraphs[0].paragraph_format.space_before = Pt(4)   # half-line between edu entries
     r0c1.paragraphs[0].paragraph_format.space_after  = Pt(2)
 
     if institution:
