@@ -113,16 +113,24 @@ def sentence_case(text: str) -> str:
 
 
 def get_sections_dict(text: str) -> dict:
-    """Parse AI text into {HEADER: [lines]}, dropping skills-section noise."""
+    """
+    Parse AI text into {HEADER: [lines]}.
+    Main headers  : ALL CAPS ending with colon  →  CORE SKILLS:
+    Sub-headers   : lines starting with ##       →  ##Technical skills:
+    Sub-headers are stored as-is so the renderer can detect and style them.
+    Drops known skills-section noise artefacts.
+    """
     sections, current_header = {}, None
     for line in text.split("\n"):
         clean = line.strip()
         if not clean:
             continue
+        # Main section header — ALL CAPS + ends with colon
         if clean.isupper() and clean.endswith(":"):
             current_header = clean
             sections[current_header] = []
         elif current_header:
+            # Drop table/software artefacts
             if "SKILL" in current_header.upper() and any(
                 x in clean.lower() for x in ["software", "table", "the following"]
             ):
@@ -410,51 +418,117 @@ if uploaded_file and generate_btn:
             else:
                 raw = Image.open(uploaded_file)
 
-            # ── STAGE 1: AI reads and deeply understands the resume ──────────
-            # This call analyses the resume structure, identifies every section,
-            # cleans noise, and strips ALL personal contact details before
-            # anything else happens. The output of this stage becomes the input
-            # for stage 2 — so stage 2 never even sees the contact data.
-            st.write("🧠 Understanding resume structure...")
+            # ── STAGE 1: Deep understanding ──────────────────────────────────
+            st.write("🧠 Reading and understanding resume deeply...")
 
             understanding_prompt = """
-            You are a professional resume analyst. Your job is to deeply read and
-            understand the resume provided, then produce a clean structured summary
-            of its content ready for reformatting.
+You are an expert resume analyst. Before doing anything else, READ THE ENTIRE
+RESUME from top to bottom, understand its full structure, every section, every
+role, every qualification. Only after fully understanding it, produce the
+structured output below.
 
-            STRICT RULES — follow every one without exception:
+═══════════════════════════════════════════════════════
+STEP 1 — UNDERSTAND THE STRUCTURE
+═══════════════════════════════════════════════════════
+Identify every section in the resume — common ones include:
+  Summary / Objective / Profile
+  Experience / Work History / Employment
+  Education / Academic Background / Qualifications
+  Certifications / Licenses / Accreditations
+  Skills / Core Competencies / Technical Skills / Professional Skills
+  Tools / Technologies / Software
+  Projects / Publications / Awards / Languages / etc.
 
-            REMOVE COMPLETELY (do not include anywhere in your output):
-            - Candidate full name
-            - Phone numbers (any format)
-            - Email addresses
-            - LinkedIn URLs or profile links
-            - Any website, portfolio, GitHub, or social media links
-            - Home address, city, state, zip, country of residence
-            - Any line that is solely contact or personal identification info
+IMPORTANT — SHARED SECTIONS:
+Some resumes combine two topics under one heading, such as:
+  "Education and Certifications", "Skills and Tools",
+  "Certifications and Licenses", "Education and Professional Development"
+When you see this, SPLIT them into TWO separate ALL-CAPS headers.
+Example: "EDUCATION AND CERTIFICATIONS:" → write as:
+  EDUCATION:
+  (all education entries)
+  CERTIFICATIONS:
+  (all certification entries)
 
-            KEEP AND STRUCTURE:
-            - Professional summary or objective (if present)
-            - All work experience entries with company, date range, job title,
-              and description bullets
-            - All education entries with degree, institution, date
-            - Skills, tools, certifications, and any other professional sections
+IMPORTANT — SKILLS WITH SUB-CATEGORIES:
+If the resume lists skills under sub-categories like:
+  Technical Skills: Python, SQL, Azure
+  Professional Skills: Leadership, Communication
+  Soft Skills: ...
+Then preserve those sub-categories. Write the main header as CORE SKILLS:
+and use indented sub-headers like:
+  ##Technical skills:
+  (skills listed as bullets)
+  ##Professional skills:
+  (skills listed as bullets)
+The ## prefix marks a sub-header — do NOT use ## for main section headers.
 
-            OUTPUT FORMAT — return a clean plain-text structured resume with:
-            - Section headers in ALL CAPS ending with a colon (e.g. SUMMARY:)
-            - Use EXPERIENCE: for work history (never 'Experience/Education')
-            - Each experience entry: Company | Date Range on one line,
-              job title on the very next line, then bullet points
-            - Each education entry: Degree | Date on one line,
-              institution on the very next line
-            - Bullet points starting with •
-            - No markdown, no asterisks, no bold markers, no table artifacts,
-              no mention of 'Software' or 'Table' as content
-            - No contact details of any kind anywhere in the output
+═══════════════════════════════════════════════════════
+STEP 2 — STRIP ALL PERSONAL / CONTACT INFORMATION
+═══════════════════════════════════════════════════════
+Remove completely — do NOT include anywhere in output:
+  - Candidate full name
+  - Phone numbers (any format)
+  - Email addresses
+  - LinkedIn, GitHub, portfolio, or any URLs
+  - Home address, city, state, zip, country of residence
+  - Any line that exists solely to identify the person
 
-            Now read and understand this resume thoroughly, then output the
-            clean structured version:
-            """
+═══════════════════════════════════════════════════════
+STEP 3 — STRUCTURE THE OUTPUT
+═══════════════════════════════════════════════════════
+Return a clean plain-text structured resume using these rules:
+
+SECTION HEADERS:
+  - ALL CAPS ending with a colon: EXPERIENCE:  EDUCATION:  CORE SKILLS:
+  - Use EXPERIENCE: (never "Work History / Education" or combined labels)
+  - Each main header on its own line
+
+SUB-HEADERS (skills sub-categories only):
+  - Prefix with ## and title case: ##Technical skills:
+  - On its own line, directly inside the main section
+
+EXPERIENCE ENTRIES:
+  - Line 1: Company Name | Date Range
+  - Line 2: Job Title  (on its own line, below company)
+  - Lines 3+: bullet points starting with •
+  - Every description line MUST start with • (never leave description unbulleted)
+  - Job descriptions are plain text — NO bold, no asterisks, no markdown
+
+DATE RANGE RULES (critical):
+  - Format: Mon YYYY - Mon YYYY   or   Mon YYYY - Present
+  - Use ONLY the first 3 letters of any month: Jan Feb Mar Apr May Jun
+    Jul Aug Sep Oct Nov Dec
+  - If BOTH month AND year are given: Jan 2020 - Mar 2023
+  - If ONLY year is given: 2020 - 2023  (do NOT invent a month)
+  - If NO date is given at all: leave the date field completely EMPTY
+    (do NOT write "Date Unknown", "N/A", or any placeholder)
+  - The entire date range must fit on one line — never split across two lines
+
+EDUCATION ENTRIES:
+  - Line 1: Degree Name | Date  (date only if actually present in the resume)
+  - Line 2: Institution Name  (on its own line below the degree)
+  - If no date: Degree Name | (leave after pipe empty, or omit pipe if no date)
+
+CERTIFICATIONS:
+  - Certification Name | Date  (if date present)
+  - Issuing body on the next line (if present)
+  - If no date: just the certification name, no pipe
+
+BULLETS:
+  - Every job description point MUST start with •
+  - Never leave a description line without a bullet
+  - No bold, no asterisks, no markdown inside bullet text
+
+GENERAL:
+  - No markdown formatting anywhere (no **, no *, no #, no ---)
+  - No mention of "Table", "Software" as content artefacts
+  - No fabrication — only use information present in the original resume
+  - No contact details anywhere in the output
+
+Now read the resume completely, understand every section, then produce the
+fully structured output:
+"""
 
             stage1_response = model.generate_content(
                 [understanding_prompt, raw] if not isinstance(raw, str)
@@ -462,50 +536,85 @@ if uploaded_file and generate_btn:
             )
             understood_resume = stage1_response.text.replace("**", "").strip()
 
-            # ── STAGE 2: AI reformats based on its understanding ─────────────
-            # At this point contact details are already gone. Stage 2 focuses
-            # purely on formatting quality — summary, confidentiality, structure.
-            st.write("✨ Reformatting with AI...")
+            # ── STAGE 2: Polish and enforce all formatting rules ──────────────
+            st.write("✨ Polishing and finalising...")
 
-            sum_p  = (
-                f"Generate or improve a professional SUMMARY: section using "
-                f"these focus points: {custom_points}. "
-                f"If no focus points given, craft a strong executive summary "
-                f"from the candidate's experience."
-            ) if include_summary else "Do not add or modify any SUMMARY section."
+            sum_p = (
+                f"Write or improve the SUMMARY: section using these focus points: "
+                f"{custom_points}. If no focus points given, craft a strong "
+                f"executive summary from the candidate's experience and skills."
+            ) if include_summary else "Do NOT add, change, or remove any SUMMARY: section."
 
             priv_p = (
-                "CRITICAL PRIVACY RULE: Replace ALL employer/company names "
-                "with '[CONFIDENTIAL]'. This applies to every experience entry."
+                "CONFIDENTIALITY RULE: Replace every employer/company name with "
+                "'[CONFIDENTIAL]'. Apply this to every experience entry without exception."
             ) if make_confidential else ""
 
             reformat_prompt = f"""
-            You are a professional resume formatter. You have been given a
-            pre-analysed resume with contact details already removed.
-            Your job is ONLY to refine the formatting and content quality.
+You are a professional resume formatter. The resume below has already been
+read and structured. Your job is to do a final quality pass — enforce every
+formatting rule precisely and improve bullet point language.
 
-            RULES:
-            - {sum_p}
-            - {priv_p}
-            - Keep ALL section headers in ALL CAPS ending with colon
-            - Keep the exact structure: Company | Date Range on one line,
-              job title on the next line, then bullet points beneath
-            - Keep education structure: Degree | Date on one line,
-              institution on the next line
-            - Improve bullet point wording to be strong, action-oriented,
-              and results-focused where possible
-            - Do NOT add any contact details, names, emails, phones,
-              or links back in — they have been intentionally removed
-            - Do NOT add any markdown formatting, asterisks, or bold markers
-            - Do NOT invent or fabricate any experience or qualifications
-            - Return only the final clean resume text, nothing else
+{sum_p}
+{priv_p}
 
-            RESUME TO REFORMAT:
-            {understood_resume}
-            """
+FORMATTING RULES — enforce every single one:
+
+1. SECTION HEADERS — ALL CAPS ending with colon. One per line.
+   Valid examples: SUMMARY:  EXPERIENCE:  EDUCATION:  CORE SKILLS:
+   CERTIFICATIONS:  TOOLS:  PROJECTS:
+
+2. SUB-HEADERS (inside skills/tools sections only):
+   Keep lines starting with ## exactly as-is: ##Technical skills:
+   These are sub-headers — do NOT convert them to main headers.
+
+3. EXPERIENCE ENTRIES — strict two-line format:
+   Line 1: COMPANY NAME | Date Range
+   Line 2: Job Title
+   Then bullet points. Never put company and job title on the same line.
+
+4. JOB DESCRIPTIONS — every single description line MUST:
+   - Start with a bullet: •
+   - Be plain text — NO bold, no asterisks, no markdown
+   - Be action-oriented and results-focused
+   - Never be left unbulleted even if the original had no bullet
+
+5. DATE RANGE — strict format:
+   - Use 3-letter month abbreviations only: Jan Feb Mar Apr May Jun
+     Jul Aug Sep Oct Nov Dec
+   - Format: Mon YYYY - Mon YYYY   OR   Mon YYYY - Present
+   - Year only (if no month in resume): 2019 - 2022
+   - NO date in resume: leave the date portion completely blank
+     (NEVER write "Date Unknown", "N/A", "Present" if not stated)
+   - The entire date range must fit on ONE line — never wrap
+
+6. EDUCATION — Line 1: Degree | Date (blank after | if no date)
+   Line 2: Institution
+
+7. CERTIFICATIONS — Name | Date (if date given), institution on next line
+
+8. BULLETS in all sections:
+   - Must start with •
+   - No bold, no asterisks, no markdown
+
+9. NO fabrication — do not add experience, dates, or qualifications
+   not present in the resume below.
+
+10. NO contact details — no name, phone, email, address, or URLs.
+
+11. Return ONLY the final resume text. No commentary, no preamble.
+
+RESUME TO FINALISE:
+{understood_resume}
+"""
 
             stage2_response = model.generate_content(reformat_prompt)
-            st.session_state.original_ai_output = stage2_response.text.replace("**", "").strip()
+            st.session_state.original_ai_output = (
+                stage2_response.text
+                .replace("**", "")
+                .replace("__", "")
+                .strip()
+            )
             st.write("✅ Done!")
 
         except Exception as e:
@@ -615,12 +724,23 @@ if st.session_state.original_ai_output:
 
                 # ════════════════════════════════════════════════════════════
                 # LIST SECTIONS  (Skills / Certifications / Tools / etc.)
+                #   • Lines starting with ## are sub-headers (e.g. ##Technical skills:)
                 #   • '|' splits into individual items, each its own bullet
-                #   • Sentence case (first letter cap, rest lower)
-                #   • Never bold
+                #   • Everything sentence case, never bold
                 # ════════════════════════════════════════════════════════════
                 if is_list:
-                    if "|" in line and not is_company_date_line(line):
+                    if line.startswith("##"):
+                        # Sub-header — render as small bold label, not a bullet
+                        sub_text = line.lstrip("#").strip()
+                        sp = doc.add_paragraph()
+                        sp.paragraph_format.space_before = Pt(SP)
+                        sp.paragraph_format.space_after  = Pt(3)
+                        sp.paragraph_format.keep_with_next = True
+                        r = sp.add_run(sentence_case(sub_text))
+                        r.bold      = True
+                        r.font.name = "Arial"
+                        r.font.size = Pt(10.5)
+                    elif "|" in line and not is_company_date_line(line):
                         # '|' = multiple skill items on one line → split into bullets
                         for seg in split_by_pipe(line):
                             add_bullet(doc, sentence_case(seg), bold=False)
@@ -632,8 +752,7 @@ if st.session_state.original_ai_output:
                 # EXPERIENCE
                 #   Company | Date  +  next line = Job Title
                 #   → 2-row table: row1=company+date, row2=job title
-                #   keep_with_next on the paragraph before the table so
-                #   Word never orphans company name on the last line of a page
+                #   All description bullets → plain text, never bold
                 # ════════════════════════════════════════════════════════════
                 elif is_exp:
                     if is_company_date_line(line):
@@ -654,19 +773,10 @@ if st.session_state.original_ai_output:
                         set_keep_with_next(anchor)
                         add_experience_row(doc, company_str, date_str, job_title)
                     else:
-                        # Plain line in experience — could be a job title that
-                        # contains '|' (e.g. 'Manager | Team Lead') or a bullet.
-                        # Render as-is: bold if it looks like a title (no bullet
-                        # prefix), otherwise as a bullet.
+                        # All non-company-date lines in experience are descriptions
+                        # → always render as unbold bullet regardless of prefix
                         clean_line = line.lstrip("•*-– ").strip()
-                        if line.startswith(("•", "*", "-", "–")):
-                            add_bullet(doc, sentence_case(clean_line), bold=False)
-                        else:
-                            # Treat as job title / standalone bold line
-                            p = doc.add_paragraph()
-                            p.paragraph_format.space_before = Pt(4)
-                            p.paragraph_format.space_after  = Pt(4)
-                            _base_run(p, sentence_case(line), bold=True)
+                        add_bullet(doc, sentence_case(clean_line), bold=False)
                     i += 1
 
                 # ════════════════════════════════════════════════════════════
