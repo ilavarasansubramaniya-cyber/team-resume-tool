@@ -142,36 +142,75 @@ def get_sections_dict(text: str) -> dict:
 def _replace_in_para(p, targets: dict):
     """
     Replace tokens inside a paragraph preserving run formatting.
-    Always merges all run text first so split tokens like
-    '[' + 'CONTACT_NUMBER' + ']' are found and replaced correctly.
-    The replaced text is put into the first run; other runs are cleared.
+    Merges all run text first so split tokens like '[' + 'CONTACT_NUMBER' + ']'
+    are always found. Result goes into first run; others are cleared.
     """
     if not p.runs:
         return
-
     full_text = "".join(r.text for r in p.runs)
     if not any(tok in full_text for tok in targets):
         return
-
-    # Apply all replacements to the merged text
     new_text = full_text
     for token, val in targets.items():
         new_text = new_text.replace(token, val)
-
     if new_text == full_text:
-        return  # nothing changed
-
-    # Put the replaced text in the first run, clear the rest
+        return
     p.runs[0].text = new_text
     for run in p.runs[1:]:
         run.text = ""
 
 
+def _scan_element_for_placeholders(element, targets: dict):
+    """
+    Recursively scan ANY XML element for <w:t> nodes and replace tokens.
+    This catches text inside floating text boxes (w:txbxContent), drawing
+    shapes, and any other container that normal paragraph/table iteration misses.
+    Uses raw XML so nothing is ever skipped regardless of nesting depth.
+    """
+    from docx.oxml.ns import qn as _qn
+    W_T = _qn("w:t")
+    # Collect all <w:t> elements anywhere in this element tree
+    for wt in element.iter(W_T):
+        text = wt.text or ""
+        if not any(tok in text for tok in targets):
+            continue
+        new_text = text
+        for token, val in targets.items():
+            new_text = new_text.replace(token, val)
+        wt.text = new_text
+
+    # Also handle tokens split across sibling <w:t> nodes within the same <w:r>
+    # by scanning all <w:p> ancestors and merging runs there too
+    W_P = _qn("w:p")
+    W_R = _qn("w:r")
+    for wp in element.iter(W_P):
+        runs = wp.findall(f".//{W_R}")
+        full = "".join((r.find(W_T).text or "") if r.find(W_T) is not None else "" for r in runs)
+        if not any(tok in full for tok in targets):
+            continue
+        new_full = full
+        for token, val in targets.items():
+            new_full = new_full.replace(token, val)
+        if new_full == full:
+            continue
+        # Write back into first w:t of the paragraph, blank the rest
+        first_wt = None
+        for r in runs:
+            wt = r.find(W_T)
+            if wt is None:
+                continue
+            if first_wt is None:
+                first_wt = wt
+                first_wt.text = new_full
+            else:
+                wt.text = ""
+
+
 def replace_all_placeholders(doc, contact: str, title: str, name: str):
     """
-    Replace [CONTACT_NUMBER], [DOCUMENT_TITLE] and [NAME] everywhere in the
-    document — headers, footers (including tables within them), body
-    paragraphs, and body tables — preserving all run-level formatting.
+    Replace [CONTACT_NUMBER], [DOCUMENT_TITLE] and [NAME] everywhere —
+    including inside floating text boxes in headers/footers which the
+    standard python-docx .paragraphs iterator completely misses.
     """
     targets = {
         "[CONTACT_NUMBER]": contact,
@@ -179,23 +218,13 @@ def replace_all_placeholders(doc, contact: str, title: str, name: str):
         "[NAME]":           name,
     }
 
-    def scan_part(part):
-        """Scan all paragraphs and tables (recursively) in a doc part."""
-        for p in part.paragraphs:
-            _replace_in_para(p, targets)
-        for table in part.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for p in cell.paragraphs:
-                        _replace_in_para(p, targets)
-
-    # Headers & footers (including tables inside them)
+    # Scan every section header and footer element tree in full (catches textboxes)
     for section in doc.sections:
         for part in [section.header, section.footer]:
-            scan_part(part)
+            _scan_element_for_placeholders(part._element, targets)
 
-    # Main body
-    scan_part(doc)
+    # Scan the main document body element tree in full
+    _scan_element_for_placeholders(doc.element.body, targets)
 
 
 # ── Section-type detectors ────────────────────────────────────────────────────
@@ -279,14 +308,11 @@ def is_company_date_line(line: str) -> bool:
     return False
 
 
-def _make_two_col_table(doc, total_dxa=10080, date_dxa=2160):
+def _make_two_col_table(doc, total_dxa=8510, date_dxa=2200):
     """
-    Create an invisible 2-column table with FIXED layout so Word never
-    redistributes column widths regardless of content length.
-    total_dxa : total table width in DXA  (10080 = 7", standard body)
-    date_dxa  : date column width in DXA  (2160 = 1.5", fits longest date)
-    content_dxa is derived automatically.
-    Returns (tbl, content_dxa, date_dxa) — caller adds rows.
+    Invisible 2-column fixed-layout table.
+    Default widths match A4 page with 1700 DXA margins (11910 - 3400 = 8510).
+    date_dxa=2200 fits 'Sep 2020 - Present' at 10.5pt comfortably.
     """
     from docx.oxml.ns import qn as _qn
     from docx.oxml import OxmlElement as _OE
@@ -364,8 +390,8 @@ def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
     Fixed layout + explicit DXA widths ensure dates ALWAYS start at the
     same column and NEVER wrap — regardless of content length.
     """
-    TOTAL = 10080   # 7" body width in DXA
-    DATE  = 2160    # 1.5" — fits "Sep 2020 - Present" comfortably
+    TOTAL = 8510    # A4 body: 11910 - 1700*2 margins
+    DATE  = 2200    # 1.53" — fits "Sep 2020 - Present" at 10.5pt
     CONT  = TOTAL - DATE
 
     tbl, _, _ = _make_two_col_table(doc, total_dxa=TOTAL, date_dxa=DATE)
@@ -421,8 +447,8 @@ def add_education_row(doc, degree_part: str, date_part: str, institution: str = 
     Institution is sentence case, not bold, starting on the line below.
     Date column is identical to experience — all dates line up across the doc.
     """
-    TOTAL = 10080
-    DATE  = 2160
+    TOTAL = 8510
+    DATE  = 2200
     CONT  = TOTAL - DATE
 
     rows_needed = 2 if institution else 1
