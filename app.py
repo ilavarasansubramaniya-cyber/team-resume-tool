@@ -821,217 +821,273 @@ if st.session_state.original_ai_output:
             default=list(current_sections.keys()),
         )
 
+    # ── Rebuild editor text in reordered order so editor reflects reorder ──
+    if header_order:
+        reordered_lines = []
+        for h in header_order:
+            if h in current_sections:
+                reordered_lines.append(h)
+                reordered_lines.extend(current_sections[h])
+        # Any headers not in header_order (unchecked) go at end
+        for h, lines in current_sections.items():
+            if h not in header_order:
+                reordered_lines.append(h)
+                reordered_lines.extend(lines)
+        reordered_text = "\n".join(reordered_lines)
+    else:
+        reordered_text = final_text
+
+    with c_edit:
+        # ── Visible save hint ───────────────────────────────────────────────
+        st.markdown(
+            '<div class="save-hint">'
+            '💾 Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to apply your edits'
+            ' before downloading'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("#### 🖋️ Live Editor")
+        final_text = st.text_area(
+            "Content Control:",
+            value=reordered_text,
+            height=580,
+            label_visibility="collapsed",
+            help="Edit content here, then press Ctrl+Enter to apply changes.",
+        )
+
+    # Re-parse after any manual edits in the editor
+    current_sections = get_sections_dict(final_text)
+    # header_order stays as selected in sidebar
+
     with c_preview:
         st.subheader("✅ Finalize & Download")
 
-        t_map  = {
-            "W3G":      "w3g_template.docx",
-            "Synectics": "synectics_template.docx",
-            "ProTouch": "protouch_template.docx",
-        }
-        t_path = t_map.get(company_choice)
-        doc    = docx.Document(t_path) if os.path.exists(t_path) else docx.Document()
+        if st.button("📋 CHECK & DOWNLOAD", use_container_width=True):
+            with st.spinner("🔍 AI checking formatting before export..."):
+                try:
+                    model_qa = genai.GenerativeModel(MODEL_NAME)
+                    qa_prompt = f"""
+You are a strict resume formatting QA checker. Check every rule below and
+return a CORRECTED resume text. Fix violations silently — no explanations.
 
-        # Global default font
-        style           = doc.styles["Normal"]
-        style.font.name = "Arial"
-        style.font.size = Pt(10.5)
+RULES TO ENFORCE:
 
-        replace_all_placeholders(doc, contact_number, document_name, document_name)
+1. SECTION HEADERS: ALL CAPS ending colon, own line. e.g. EXPERIENCE:
 
-        # ── MOVE WATERMARK TO HEADER (repeats on every page) ──────────────────
-        # The template watermark is in the body (page 1 only). Moving it to the
-        # header makes it appear on every page automatically.
-        move_watermark_to_header(doc)
+2. EXPERIENCE — strict 2-line:
+   Line 1: COMPANY NAME | Mon YYYY - Mon YYYY
+   Line 2: Job Title (alone, never on same line as company)
+   Date must contain ONLY date — NO city/state/location in date column.
 
-        # ── CLEAR EMPTY TEMPLATE BODY PARAGRAPHS (preserve drawings) ─────────
-        from docx.oxml.ns import qn as _qn
-        body = doc.element.body
-        W_DRAWING = _qn("w:drawing")
-        W_PICT    = _qn("w:pict")
-        while True:
-            children = [c for c in body if c.tag != _qn("w:sectPr")]
-            if not children:
+3. EDUCATION — strict 2-line:
+   Line 1: DEGREE NAME | Date   (ONLY date after pipe, nothing else)
+   Line 2: Institution name (alone on its own line)
+   If institution is after the pipe → move it to line 2.
+   If institution and date are mixed → split them correctly.
+
+4. DATE RANGE: Mon YYYY - Mon YYYY or Mon YYYY - Present or YYYY - YYYY.
+   3-letter months only. No location in date. Blank if no date given.
+
+5. Every description bullet must start with •. No bold/asterisks/markdown.
+
+6. No contact info (name, phone, email, address, URL) anywhere.
+
+7. No markdown (no **, __, *, #headers, --- dividers).
+
+Return ONLY the corrected resume text. No preamble.
+
+RESUME:
+{final_text}
+"""
+                    qa_response = model_qa.generate_content(qa_prompt)
+                    checked_text = (
+                        qa_response.text
+                        .replace("**", "").replace("__", "").strip()
+                    )
+                    current_sections = get_sections_dict(checked_text)
+                    st.success("✅ QA passed — building resume...")
+                except Exception as e:
+                    st.warning(f"QA skipped: {e}")
+                    checked_text = final_text
+
+            t_map  = {
+                "W3G":       "w3g_template.docx",
+                "Synectics": "synectics_template.docx",
+                "ProTouch":  "protouch_template.docx",
+            }
+            t_path = t_map.get(company_choice)
+            doc    = docx.Document(t_path) if os.path.exists(t_path) else docx.Document()
+
+            style           = doc.styles["Normal"]
+            style.font.name = "Arial"
+            style.font.size = Pt(10.5)
+
+            replace_all_placeholders(doc, contact_number, document_name, document_name)
+            move_watermark_to_header(doc)
+
+            # ── CLEAR EMPTY TEMPLATE BODY PARAGRAPHS (keep drawings) ──────────
+            from docx.oxml.ns import qn as _qn
+            body      = doc.element.body
+            W_DRAWING = _qn("w:drawing")
+            W_PICT    = _qn("w:pict")
+            while True:
+                children = [c for c in body if c.tag != _qn("w:sectPr")]
+                if not children:
+                    break
+                last = children[-1]
+                if last.tag == _qn("w:p"):
+                    has_draw = (last.find(f".//{W_DRAWING}") is not None or
+                                last.find(f".//{W_PICT}")    is not None)
+                    text = "".join(t.text or "" for t in last.iter(_qn("w:t")))
+                    if not text.strip() and not has_draw:
+                        body.remove(last)
+                        continue
                 break
-            last = children[-1]
-            if last.tag == _qn("w:p"):
-                has_drawing = (last.find(f".//{W_DRAWING}") is not None or
-                               last.find(f".//{W_PICT}")    is not None)
-                text = "".join(t.text or "" for t in last.iter(_qn("w:t")))
-                if not text.strip() and not has_drawing:
-                    body.remove(last)
+
+            # ── ONE LINE SPACE top & bottom on EVERY PAGE ─────────────────────
+            # Set via XML spacing on header/footer paragraphs so it applies to
+            # all pages, not just page 1.
+            ONE_LINE = 240   # 240 twentieths-of-a-point = 12pt = 1 line
+
+            for section in doc.sections:
+                # TOP: space_after on the last header paragraph
+                hdr = section.header
+                if hdr.paragraphs:
+                    last_hdr = hdr.paragraphs[-1]
+                    pPr = last_hdr._element.get_or_add_pPr()
+                    spacing = pPr.find(_qn("w:spacing"))
+                    if spacing is None:
+                        from docx.oxml import OxmlElement as _OE
+                        spacing = _OE("w:spacing")
+                        pPr.append(spacing)
+                    spacing.set(_qn("w:after"), str(ONE_LINE))
+
+                # BOTTOM: space_before on the first footer paragraph
+                ftr = section.footer
+                if ftr.paragraphs:
+                    first_ftr = ftr.paragraphs[0]
+                    pPr = first_ftr._element.get_or_add_pPr()
+                    spacing = pPr.find(_qn("w:spacing"))
+                    if spacing is None:
+                        from docx.oxml import OxmlElement as _OE
+                        spacing = _OE("w:spacing")
+                        pPr.append(spacing)
+                    # Preserve existing attributes, only set/override 'before'
+                    spacing.set(_qn("w:before"), str(ONE_LINE))
+
+            # ── SECTION LOOP ──────────────────────────────────────────────────
+            for h in header_order:
+                if h not in current_sections:
                     continue
-            break
 
-        # ── ONE LINE SPACE top & bottom on EVERY page via header/footer ───────
-        # The correct way to get spacing on every page (not just page 1) is to
-        # add space_after to the LAST paragraph of the header (creates gap below
-        # the header line on every page) and space_before to the FIRST paragraph
-        # of the footer (creates gap above the footer line on every page).
-        # The body top_spacer only affects page 1; header/footer spacing is global.
+                is_list = _is_list_section(h)
+                is_exp  = _is_exp_section(h)
+                is_edu  = _is_edu_section(h)
+                is_summ = _is_summ_section(h)
 
-        ONE_LINE = Pt(12)   # 1 line ≈ 12pt
+                # Section header paragraph
+                hp = doc.add_paragraph()
+                hp.paragraph_format.space_before   = Pt(SP)
+                hp.paragraph_format.space_after    = Pt(SP)
+                hp.paragraph_format.keep_with_next = True
+                set_keep_with_next(hp)
+                _base_run(hp, h, bold=True, size_pt=11)
 
-        # Top spacing on every page: pad the last paragraph of the header
-        for section in doc.sections:
-            hdr = section.header
-            if hdr.paragraphs:
-                hdr.paragraphs[-1].paragraph_format.space_after = ONE_LINE
+                lines = current_sections[h]
+                i = 0
 
-        # Bottom spacing on every page: pad the first paragraph of the footer
-        # WITHOUT touching any text or runs — only paragraph spacing
-        for section in doc.sections:
-            ftr = section.footer
-            if ftr.paragraphs:
-                ftr.paragraphs[0].paragraph_format.space_before = ONE_LINE
+                while i < len(lines):
+                    line = lines[i]
 
-        # ── SECTION LOOP ──────────────────────────────────────────────────────
-        for h in header_order:
-            if h not in current_sections:
-                continue
+                    # ── LIST SECTIONS ─────────────────────────────────────────
+                    if is_list:
+                        if line.startswith("##"):
+                            sub_text = line.lstrip("#").strip()
+                            sp = doc.add_paragraph()
+                            sp.paragraph_format.space_before = Pt(SP)
+                            sp.paragraph_format.space_after  = Pt(3)
+                            sp.paragraph_format.keep_with_next = True
+                            r = sp.add_run(sentence_case(sub_text))
+                            r.bold = True; r.font.name = "Arial"; r.font.size = Pt(10.5)
+                        elif "|" in line and not is_company_date_line(line):
+                            for seg in split_by_pipe(line):
+                                add_bullet(doc, sentence_case(seg), bold=False)
+                        else:
+                            add_bullet(doc, sentence_case(line), bold=False)
+                        i += 1
 
-            is_list = _is_list_section(h)
-            is_exp  = _is_exp_section(h)
-            is_edu  = _is_edu_section(h)
-            is_summ = _is_summ_section(h)
-            is_job  = is_exp or is_edu
+                    # ── EXPERIENCE ────────────────────────────────────────────
+                    elif is_exp:
+                        if is_company_date_line(line):
+                            parts       = line.split("|")
+                            company_str = parts[0].strip()
+                            date_str    = parts[-1].strip()
+                            job_title   = ""
+                            if i + 1 < len(lines) and not is_company_date_line(lines[i + 1]):
+                                job_title = lines[i + 1]
+                                i += 1
+                            anchor = doc.add_paragraph()
+                            anchor.paragraph_format.space_before   = Pt(0)
+                            anchor.paragraph_format.space_after    = Pt(0)
+                            anchor.paragraph_format.keep_with_next = True
+                            set_keep_with_next(anchor)
+                            add_experience_row(doc, company_str, date_str, job_title)
+                        else:
+                            clean_line = line.lstrip("•*-– ").strip()
+                            add_bullet(doc, sentence_case(clean_line), bold=False)
+                        i += 1
 
-            # ── Section Header ────────────────────────────────────────────────
-            hp = doc.add_paragraph()
-            hp.paragraph_format.space_before   = Pt(SP)
-            hp.paragraph_format.space_after    = Pt(SP)
-            hp.paragraph_format.keep_with_next = True
-            set_keep_with_next(hp)   # XML-level keep — pushes to next page if on last line
-            _base_run(hp, h, bold=True, size_pt=11)
+                    # ── EDUCATION ─────────────────────────────────────────────
+                    elif is_edu:
+                        if is_company_date_line(line):
+                            parts       = line.split("|")
+                            degree_str  = parts[0].strip()
+                            date_str    = parts[-1].strip()
+                            institution = ""
+                            if i + 1 < len(lines) and not is_company_date_line(lines[i + 1]):
+                                institution = lines[i + 1]
+                                i += 1
+                            anchor = doc.add_paragraph()
+                            anchor.paragraph_format.space_before   = Pt(0)
+                            anchor.paragraph_format.space_after    = Pt(0)
+                            anchor.paragraph_format.keep_with_next = True
+                            set_keep_with_next(anchor)
+                            add_education_row(doc, degree_str, date_str, institution)
+                        else:
+                            p = doc.add_paragraph()
+                            p.paragraph_format.space_after = Pt(SP)
+                            _base_run(p, sentence_case(line), bold=False)
+                        i += 1
 
-            # ── Section Content ───────────────────────────────────────────────
-            lines = current_sections[h]
-            i = 0
+                    # ── SUMMARY ───────────────────────────────────────────────
+                    elif is_summ:
+                        p = doc.add_paragraph()
+                        p.paragraph_format.space_before = Pt(0)
+                        p.paragraph_format.space_after  = Pt(SP)
+                        _base_run(p, sentence_case(line), bold=False)
+                        i += 1
 
-            while i < len(lines):
-                line = lines[i]
-
-                # ════════════════════════════════════════════════════════════
-                # LIST SECTIONS  (Skills / Certifications / Tools / etc.)
-                #   • Lines starting with ## are sub-headers (e.g. ##Technical skills:)
-                #   • '|' splits into individual items, each its own bullet
-                #   • Everything sentence case, never bold
-                # ════════════════════════════════════════════════════════════
-                if is_list:
-                    if line.startswith("##"):
-                        # Sub-header — render as small bold label, not a bullet
-                        sub_text = line.lstrip("#").strip()
-                        sp = doc.add_paragraph()
-                        sp.paragraph_format.space_before = Pt(SP)
-                        sp.paragraph_format.space_after  = Pt(3)
-                        sp.paragraph_format.keep_with_next = True
-                        r = sp.add_run(sentence_case(sub_text))
-                        r.bold      = True
-                        r.font.name = "Arial"
-                        r.font.size = Pt(10.5)
-                    elif "|" in line and not is_company_date_line(line):
-                        # '|' = multiple skill items on one line → split into bullets
-                        for seg in split_by_pipe(line):
-                            add_bullet(doc, sentence_case(seg), bold=False)
+                    # ── EVERYTHING ELSE ───────────────────────────────────────
                     else:
                         add_bullet(doc, sentence_case(line), bold=False)
-                    i += 1
+                        i += 1
 
-                # ════════════════════════════════════════════════════════════
-                # EXPERIENCE
-                #   Company | Date  +  next line = Job Title
-                #   → 2-row table: row1=company+date, row2=job title
-                #   All description bullets → plain text, never bold
-                # ════════════════════════════════════════════════════════════
-                elif is_exp:
-                    if is_company_date_line(line):
-                        # ── Company | Date row ────────────────────────────────
-                        parts       = line.split("|")
-                        company_str = parts[0].strip()
-                        date_str    = parts[-1].strip()
-                        # Peek ahead for the job title (may itself contain '|')
-                        job_title = ""
-                        if i + 1 < len(lines) and not is_company_date_line(lines[i + 1]):
-                            job_title = lines[i + 1]
-                            i += 1   # consume the title line
-                        # Anchor paragraph — keep_with_next pushes whole block
-                        anchor = doc.add_paragraph()
-                        anchor.paragraph_format.space_before   = Pt(0)
-                        anchor.paragraph_format.space_after    = Pt(0)
-                        anchor.paragraph_format.keep_with_next = True
-                        set_keep_with_next(anchor)
-                        add_experience_row(doc, company_str, date_str, job_title)
-                    else:
-                        # All non-company-date lines in experience are descriptions
-                        # → always render as unbold bullet regardless of prefix
-                        clean_line = line.lstrip("•*-– ").strip()
-                        add_bullet(doc, sentence_case(clean_line), bold=False)
-                    i += 1
+                add_spacer(doc, before=0, after=SP)
 
-                # ════════════════════════════════════════════════════════════
-                # EDUCATION
-                #   Degree | Date  →  bold degree + italic date  (row 1)
-                #   Institution    →  unbold, same line structure  (row 2)
-                #   Both rows in ONE table so degree and institution are
-                #   vertically aligned and never split across pages.
-                # ════════════════════════════════════════════════════════════
-                elif is_edu:
-                    if is_company_date_line(line):
-                        parts      = line.split("|")
-                        degree_str = parts[0].strip()
-                        date_str   = parts[-1].strip()
-                        # Peek ahead for institution line
-                        institution = ""
-                        if i + 1 < len(lines) and not is_company_date_line(lines[i + 1]):
-                            institution = lines[i + 1]
-                            i += 1   # consume institution line
-                        # Anchor paragraph keeps whole block together
-                        anchor = doc.add_paragraph()
-                        anchor.paragraph_format.space_before   = Pt(0)
-                        anchor.paragraph_format.space_after    = Pt(0)
-                        anchor.paragraph_format.keep_with_next = True
-                        set_keep_with_next(anchor)
-                        add_education_row(doc, degree_str, date_str, institution)
-                    else:
-                        # Stray line in education → plain, sentence case
-                        p = doc.add_paragraph()
-                        p.paragraph_format.space_after = Pt(SP)
-                        _base_run(p, sentence_case(line), bold=False)
-                    i += 1
+            # Hard page-break spacing
+            for p in doc.paragraphs:
+                for run in p.runs:
+                    for br in run._element.findall(qn("w:br")):
+                        if br.get(qn("w:type")) == "page":
+                            p.paragraph_format.space_before = Pt(12)
+                            p.paragraph_format.space_after  = Pt(12)
 
-                # ════════════════════════════════════════════════════════════
-                # SUMMARY
-                # ════════════════════════════════════════════════════════════
-                elif is_summ:
-                    p = doc.add_paragraph()
-                    p.paragraph_format.space_before = Pt(0)
-                    p.paragraph_format.space_after  = Pt(SP)
-                    _base_run(p, sentence_case(line), bold=False)
-                    i += 1
-
-                # ════════════════════════════════════════════════════════════
-                # EVERYTHING ELSE  → bullet, sentence case, not bold
-                # ════════════════════════════════════════════════════════════
-                else:
-                    add_bullet(doc, sentence_case(line), bold=False)
-                    i += 1
-
-            # Trailing spacer after every section (uniform)
-            add_spacer(doc, before=0, after=SP)
-
-        # ── PAGE BREAK hard-break spacing ─────────────────────────────────────
-        for p in doc.paragraphs:
-            for run in p.runs:
-                for br in run._element.findall(qn("w:br")):
-                    if br.get(qn("w:type")) == "page":
-                        p.paragraph_format.space_before = Pt(12)
-                        p.paragraph_format.space_after  = Pt(12)
-
-        buf = io.BytesIO()
-        doc.save(buf)
-        file_name = f"{document_name.strip().upper()}.docx" if document_name.strip() else "RESUME.docx"
-        st.download_button(
-            label=f"📥 DOWNLOAD {company_choice} DOCX",
-            data=buf.getvalue(),
-            file_name=file_name,
-        )
+            buf = io.BytesIO()
+            doc.save(buf)
+            file_name = (f"{document_name.strip().upper()}.docx"
+                         if document_name.strip() else "RESUME.docx")
+            st.download_button(
+                label=f"📥 DOWNLOAD {company_choice} DOCX",
+                data=buf.getvalue(),
+                file_name=file_name,
+            )
