@@ -279,99 +279,190 @@ def is_company_date_line(line: str) -> bool:
     return False
 
 
-def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
+def _make_two_col_table(doc, total_dxa=10080, date_dxa=2160):
     """
-    Layout (2-row table, 2 fixed-width columns):
-      Row 1:  COMPANY NAME (bold, left)  |  Date range (italic, right-aligned)
-      Row 2:  Job title (bold, left)     |  [empty — keeps date column fixed]
-
-    Fixed column widths guarantee ALL date ranges end on the exact same
-    right-hand margin regardless of their text length.
-    Col widths: 5.5" (content) + 1.5" (date) = 7" (standard body width)
+    Create an invisible 2-column table with FIXED layout so Word never
+    redistributes column widths regardless of content length.
+    total_dxa : total table width in DXA  (10080 = 7", standard body)
+    date_dxa  : date column width in DXA  (2160 = 1.5", fits longest date)
+    content_dxa is derived automatically.
+    Returns (tbl, content_dxa, date_dxa) — caller adds rows.
     """
-    DATE_COL = Inches(1.5)
-    CONTENT_COL = Inches(5.5)
+    from docx.oxml.ns import qn as _qn
+    from docx.oxml import OxmlElement as _OE
 
-    tbl = doc.add_table(rows=2, cols=2)
+    content_dxa = total_dxa - date_dxa
+
+    tbl = doc.add_table(rows=1, cols=2)
     tbl.autofit = False
 
-    r0c0, r0c1 = tbl.rows[0].cells   # company row
-    r1c0, r1c1 = tbl.rows[1].cells   # job title row
+    # ── Fixed table layout — prevents Word redistributing column widths ───
+    tblPr = tbl._tbl.get_or_add_tblPr()
 
-    # Fixed column widths on every cell
-    for cell, w in [(r0c0, CONTENT_COL), (r0c1, DATE_COL),
-                    (r1c0, CONTENT_COL), (r1c1, DATE_COL)]:
-        cell.width = w
+    tblLayout = _OE("w:tblLayout")
+    tblLayout.set(_qn("w:type"), "fixed")
+    tblPr.append(tblLayout)
 
-    # Row 1 left — COMPANY bold UPPER
+    # ── Lock total table width ────────────────────────────────────────────
+    tblW = tblPr.find(_qn("w:tblW"))
+    if tblW is None:
+        tblW = _OE("w:tblW"); tblPr.append(tblW)
+    tblW.set(_qn("w:w"),    str(total_dxa))
+    tblW.set(_qn("w:type"), "dxa")
+
+    # ── Remove all borders ────────────────────────────────────────────────
+    tblBorders = _OE("w:tblBorders")
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        b = _OE(f"w:{side}")
+        b.set(_qn("w:val"),  "none")
+        b.set(_qn("w:sz"),   "0")
+        b.set(_qn("w:space"),"0")
+        b.set(_qn("w:color"),"auto")
+        tblBorders.append(b)
+    tblPr.append(tblBorders)
+
+    # ── Define grid columns ───────────────────────────────────────────────
+    tblGrid = _OE("w:tblGrid")
+    for dxa in (content_dxa, date_dxa):
+        gc = _OE("w:gridCol"); gc.set(_qn("w:w"), str(dxa))
+        tblGrid.append(gc)
+    tbl._tbl.insert(1, tblGrid)   # insert after tblPr
+
+    return tbl, content_dxa, date_dxa
+
+
+def _lock_cell(cell, dxa):
+    """Set explicit DXA width on a cell so Word never overrides it."""
+    from docx.oxml.ns import qn as _qn
+    from docx.oxml import OxmlElement as _OE
+    tcPr = cell._tc.get_or_add_tcPr()
+    tcW  = tcPr.find(_qn("w:tcW"))
+    if tcW is None:
+        tcW = _OE("w:tcW"); tcPr.append(tcW)
+    tcW.set(_qn("w:w"),    str(dxa))
+    tcW.set(_qn("w:type"), "dxa")
+
+
+def _no_wrap_cell(cell):
+    """
+    Prevent cell content from wrapping onto a second line.
+    Applied to every date cell so the date stays on one line always.
+    """
+    from docx.oxml.ns import qn as _qn
+    from docx.oxml import OxmlElement as _OE
+    tcPr = cell._tc.get_or_add_tcPr()
+    nw   = _OE("w:noWrap")
+    tcPr.append(nw)
+
+
+def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
+    """
+    2-row fixed-layout table:
+      Row 1: COMPANY (bold UPPER, left)    | Date (italic, LEFT, no-wrap)
+      Row 2: Job title (bold, left)        | [empty, no-wrap]
+
+    Fixed layout + explicit DXA widths ensure dates ALWAYS start at the
+    same column and NEVER wrap — regardless of content length.
+    """
+    TOTAL = 10080   # 7" body width in DXA
+    DATE  = 2160    # 1.5" — fits "Sep 2020 - Present" comfortably
+    CONT  = TOTAL - DATE
+
+    tbl, _, _ = _make_two_col_table(doc, total_dxa=TOTAL, date_dxa=DATE)
+
+    # The table was created with 1 row — add a second
+    from docx.oxml import OxmlElement as _OE
+    from docx.oxml.ns import qn as _qn
+    tr2 = _OE("w:tr"); tbl._tbl.append(tr2)
+    for dxa in (CONT, DATE):
+        tc = _OE("w:tc")
+        tcPr = _OE("w:tcPr"); tcW = _OE("w:tcW")
+        tcW.set(_qn("w:w"), str(dxa)); tcW.set(_qn("w:type"), "dxa")
+        tcPr.append(tcW); tc.append(tcPr)
+        p = _OE("w:p"); tc.append(p); tr2.append(tc)
+
+    r0c0, r0c1 = tbl.rows[0].cells
+    r1c0, r1c1 = tbl.rows[1].cells
+
+    # Lock every cell width
+    for cell, dxa in [(r0c0, CONT), (r0c1, DATE), (r1c0, CONT), (r1c1, DATE)]:
+        _lock_cell(cell, dxa)
+
+    # No-wrap on date cells (must be set BEFORE adding text)
+    _no_wrap_cell(r0c1)
+    _no_wrap_cell(r1c1)
+
+    # Row 1: Company | Date
     _base_run(r0c0.paragraphs[0], company_part.strip().upper(), bold=True)
-
-    # Row 1 right — Date italic, RIGHT-aligned
-    r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
     _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
 
-    # Row 2 left — Job title bold, sentence case
+    # Row 2: Job title | empty
     _base_run(r1c0.paragraphs[0], sentence_case(job_title), bold=True)
 
-    # Row 2 right — empty (keeps column structure intact)
-    r1c1.paragraphs[0].text = ""
-
-    # Spacing: SP before the block (top row only), tight gap between rows
-    r0c0.paragraphs[0].paragraph_format.space_before = Pt(SP)
-    r0c1.paragraphs[0].paragraph_format.space_before = Pt(SP)
-    r0c0.paragraphs[0].paragraph_format.space_after  = Pt(2)
-    r0c1.paragraphs[0].paragraph_format.space_after  = Pt(2)
-    r1c0.paragraphs[0].paragraph_format.space_before = Pt(0)
-    r1c1.paragraphs[0].paragraph_format.space_before = Pt(0)
-    r1c0.paragraphs[0].paragraph_format.space_after  = Pt(SP)
-    r1c1.paragraphs[0].paragraph_format.space_after  = Pt(SP)
+    # Spacing
+    for p in (r0c0.paragraphs[0], r0c1.paragraphs[0]):
+        p.paragraph_format.space_before = Pt(SP)
+        p.paragraph_format.space_after  = Pt(2)
+    for p in (r1c0.paragraphs[0], r1c1.paragraphs[0]):
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after  = Pt(SP)
 
     return tbl
 
 
 def add_education_row(doc, degree_part: str, date_part: str, institution: str = ""):
     """
-    2-row × 2-column table — mirrors the experience layout exactly:
-      Row 1:  Degree (bold, left)        |  Date (italic, right-aligned)
-      Row 2:  Institution (unbold, left)  |  [empty — keeps column fixed]
+    2-row fixed-layout table (same widths as experience so dates align):
+      Row 1: DEGREE (bold ALL CAPS, left)          | Date (italic, LEFT, no-wrap)
+      Row 2: Institution (unbold, sentence case)    | [empty, no-wrap]
 
-    Same fixed column widths as experience so ALL dates align.
-    Col widths: 5.5" (content) + 1.5" (date) = 7"
+    Degree is ALL CAPS bold.
+    Institution is sentence case, not bold, starting on the line below.
+    Date column is identical to experience — all dates line up across the doc.
     """
-    DATE_COL    = Inches(1.5)
-    CONTENT_COL = Inches(5.5)
+    TOTAL = 10080
+    DATE  = 2160
+    CONT  = TOTAL - DATE
 
-    rows = 2 if institution else 1
-    tbl = doc.add_table(rows=rows, cols=2)
-    tbl.autofit = False
+    rows_needed = 2 if institution else 1
+    tbl, _, _ = _make_two_col_table(doc, total_dxa=TOTAL, date_dxa=DATE)
+
+    from docx.oxml import OxmlElement as _OE
+    from docx.oxml.ns import qn as _qn
+
+    if rows_needed == 2:
+        tr2 = _OE("w:tr"); tbl._tbl.append(tr2)
+        for dxa in (CONT, DATE):
+            tc = _OE("w:tc")
+            tcPr = _OE("w:tcPr"); tcW = _OE("w:tcW")
+            tcW.set(_qn("w:w"), str(dxa)); tcW.set(_qn("w:type"), "dxa")
+            tcPr.append(tcW); tc.append(tcPr)
+            p = _OE("w:p"); tc.append(p); tr2.append(tc)
 
     r0c0, r0c1 = tbl.rows[0].cells
-    for cell, w in [(r0c0, CONTENT_COL), (r0c1, DATE_COL)]:
-        cell.width = w
+    _lock_cell(r0c0, CONT);  _lock_cell(r0c1, DATE)
+    _no_wrap_cell(r0c1)   # set BEFORE adding text
 
-    # Row 1 left — Degree bold, sentence case
-    _base_run(r0c0.paragraphs[0], sentence_case(degree_part.strip()), bold=True)
-    r0c0.paragraphs[0].paragraph_format.space_before = Pt(4)   # half-line between edu entries
-    r0c0.paragraphs[0].paragraph_format.space_after  = Pt(2)
-
-    # Row 1 right — Date italic, right-aligned
-    r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    # Row 1: Degree ALL CAPS bold | Date italic LEFT no-wrap
+    _base_run(r0c0.paragraphs[0], degree_part.strip().upper(), bold=True)
+    r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
     _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
-    r0c1.paragraphs[0].paragraph_format.space_before = Pt(4)   # half-line between edu entries
+
+    r0c0.paragraphs[0].paragraph_format.space_before = Pt(4)
+    r0c0.paragraphs[0].paragraph_format.space_after  = Pt(2)
+    r0c1.paragraphs[0].paragraph_format.space_before = Pt(4)
     r0c1.paragraphs[0].paragraph_format.space_after  = Pt(2)
 
     if institution:
         r1c0, r1c1 = tbl.rows[1].cells
-        for cell, w in [(r1c0, CONTENT_COL), (r1c1, DATE_COL)]:
-            cell.width = w
+        _lock_cell(r1c0, CONT); _lock_cell(r1c1, DATE)
+        _no_wrap_cell(r1c1)   # set BEFORE adding text
 
-        # Row 2 left — Institution unbold, sentence case
+        # Row 2: Institution unbold sentence case | empty
         _base_run(r1c0.paragraphs[0], sentence_case(institution.strip()), bold=False)
         r1c0.paragraphs[0].paragraph_format.space_before = Pt(0)
         r1c0.paragraphs[0].paragraph_format.space_after  = Pt(SP)
-
-        # Row 2 right — empty
-        r1c1.paragraphs[0].text = ""
         r1c1.paragraphs[0].paragraph_format.space_before = Pt(0)
         r1c1.paragraphs[0].paragraph_format.space_after  = Pt(SP)
 
