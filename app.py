@@ -604,6 +604,17 @@ Identify every section in the resume — common ones include:
   Tools / Technologies / Software
   Projects / Publications / Awards / Languages / etc.
 
+IMPORTANT — NON-STANDARD SECTIONS WITH DATES:
+Some resumes have sections like MILITARY:, AWARDS:, PUBLICATIONS:,
+LANGUAGES:, VOLUNTEER: that contain entries with dates.
+Format these exactly like experience entries:
+  Item Name | Date Range
+  Description bullets (if any)
+Example for MILITARY:
+  MILITARY:
+  Paralegal Specialist – US Army National Guard | Jul 2006 - Aug 2008
+  • Description if any
+
 IMPORTANT — SHARED SECTIONS:
 Some resumes combine two topics under one heading, such as:
   "Education and Certifications", "Skills and Tools",
@@ -801,25 +812,7 @@ if st.session_state.original_ai_output:
 
     c_edit, c_preview = st.columns([1.5, 1])
 
-    with c_edit:
-        # ── Visible save hint ───────────────────────────────────────────────
-        st.markdown(
-            '<div class="save-hint">'
-            '💾 Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to apply your edits'
-            ' before downloading'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown("#### 🖋️ Live Editor")
-        final_text = st.text_area(
-            "Content Control:",
-            value=st.session_state.original_ai_output,
-            height=580,
-            label_visibility="collapsed",
-            help="Edit content here, then press Ctrl+Enter to apply changes.",
-        )
-
-    current_sections = get_sections_dict(final_text)
+    current_sections = get_sections_dict(st.session_state.original_ai_output)
 
     with st.sidebar:
         st.markdown("---")
@@ -829,24 +822,22 @@ if st.session_state.original_ai_output:
             default=list(current_sections.keys()),
         )
 
-    # ── Rebuild editor text in reordered order so editor reflects reorder ──
+    # ── Rebuild text in selected order so editor always shows reordered version
     if header_order:
         reordered_lines = []
         for h in header_order:
             if h in current_sections:
                 reordered_lines.append(h)
                 reordered_lines.extend(current_sections[h])
-        # Any headers not in header_order (unchecked) go at end
         for h, lines in current_sections.items():
             if h not in header_order:
                 reordered_lines.append(h)
                 reordered_lines.extend(lines)
         reordered_text = "\n".join(reordered_lines)
     else:
-        reordered_text = final_text
+        reordered_text = st.session_state.original_ai_output
 
     with c_edit:
-        # ── Visible save hint ───────────────────────────────────────────────
         st.markdown(
             '<div class="save-hint">'
             '💾 Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to apply your edits'
@@ -858,14 +849,13 @@ if st.session_state.original_ai_output:
         final_text = st.text_area(
             "Content Control:",
             value=reordered_text,
-            height=580,
+            height=600,
             label_visibility="collapsed",
             help="Edit content here, then press Ctrl+Enter to apply changes.",
         )
 
-    # Re-parse after any manual edits in the editor
+    # Re-parse from whatever is currently in the editor (may have manual edits)
     current_sections = get_sections_dict(final_text)
-    # header_order stays as selected in sidebar
 
     with c_preview:
         st.subheader("✅ Finalize & Download")
@@ -1071,38 +1061,52 @@ RESUME:
                         i += 1
 
                     # ── EVERYTHING ELSE ───────────────────────────────────────
+                    # e.g. MILITARY, AWARDS, LANGUAGES, etc.
+                    # If line has a pipe+date pattern → render as company-style row
+                    # (item name left, date right-aligned). Otherwise → bullet.
                     else:
-                        add_bullet(doc, sentence_case(line), bold=False)
+                        if is_company_date_line(line):
+                            parts    = line.split("|")
+                            item_str = parts[0].strip()
+                            date_str = parts[-1].strip()
+                            anchor = doc.add_paragraph()
+                            anchor.paragraph_format.space_before   = Pt(0)
+                            anchor.paragraph_format.space_after    = Pt(0)
+                            anchor.paragraph_format.keep_with_next = True
+                            set_keep_with_next(anchor)
+                            add_experience_row(doc, item_str, date_str, "")
+                        else:
+                            add_bullet(doc, sentence_case(line), bold=False)
                         i += 1
 
                 add_spacer(doc, before=0, after=SP)
 
-            # ── TOP SPACING: 1 line after header line, on every page ──────────
-            # Set space_before on the FIRST body paragraph via XML directly.
-            # This creates a visible gap between the header line and body content
-            # that applies on every page because the header/sectPr repeats.
+            # ── TOP SPACING: 1 line gap below header line on every page ──────
+            # space_before on the FIRST body paragraph, set via XML (half-points).
+            # ONE_LINE_HP = 240 half-points = 12pt. Do NOT touch header/footer
+            # paragraphs — their drawings use absolute positioning and spacing
+            # changes corrupt the footer address layout.
+            from docx.oxml.ns import qn as _qn2
+            from docx.oxml import OxmlElement as _OE_sp
+            ONE_LINE_HP = 240   # 12pt × 20 half-points/pt = 240
+
             if first_body_para is not None:
                 pPr = first_body_para._element.get_or_add_pPr()
-                spc = pPr.find(_qn("w:spacing"))
+                spc = pPr.find(_qn2("w:spacing"))
                 if spc is None:
-                    from docx.oxml import OxmlElement as _OE2
-                    spc = _OE2("w:spacing"); pPr.append(spc)
-                # Preserve existing after value, set before to ONE_LINE
-                existing_after = spc.get(_qn("w:after"), str(int(SP * 20)))
-                spc.set(_qn("w:before"), str(ONE_LINE_DXA))
-                spc.set(_qn("w:after"),  existing_after)
+                    spc = _OE_sp("w:spacing"); pPr.append(spc)
+                existing_after = spc.get(_qn2("w:after"), str(SP * 20))
+                spc.set(_qn2("w:before"), str(ONE_LINE_HP))
+                spc.set(_qn2("w:after"),  existing_after)
 
-            # ── BOTTOM SPACING: 1 line before footer line, on every page ──────
-            # Add a final empty paragraph with space_after=12pt.
-            # Do NOT touch the footer — its address boxes use absolute positioning
-            # and any footer paragraph spacing change corrupts their layout.
+            # ── BOTTOM SPACING: 1 line gap above footer line on every page ────
+            # A final empty paragraph with space_after=12pt. Footer is untouched.
             last_para = doc.add_paragraph()
-            pPr = last_para._element.get_or_add_pPr()
-            from docx.oxml import OxmlElement as _OE3
-            spc2 = _OE3("w:spacing")
-            spc2.set(_qn("w:before"), "0")
-            spc2.set(_qn("w:after"),  str(ONE_LINE_DXA))
-            pPr.append(spc2)
+            pPr2 = last_para._element.get_or_add_pPr()
+            spc2 = _OE_sp("w:spacing")
+            spc2.set(_qn2("w:before"), "0")
+            spc2.set(_qn2("w:after"),  str(ONE_LINE_HP))
+            pPr2.append(spc2)
 
             # Hard page-break spacing
             for p in doc.paragraphs:
