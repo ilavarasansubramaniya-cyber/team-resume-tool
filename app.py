@@ -311,7 +311,7 @@ def is_company_date_line(line: str) -> bool:
 def _make_two_col_table(doc, total_dxa=8510, date_dxa=2200):
     """
     Invisible 2-column fixed-layout table.
-    Default widths match A4 page with 1700 DXA margins (11910 - 3400 = 8510).
+    A4 page 11910 DXA wide, margins 1700 each side → body = 8510 DXA.
     date_dxa=2200 fits 'Sep 2020 - Present' at 10.5pt comfortably.
     """
     from docx.oxml.ns import qn as _qn
@@ -319,24 +319,25 @@ def _make_two_col_table(doc, total_dxa=8510, date_dxa=2200):
 
     content_dxa = total_dxa - date_dxa
 
-    tbl = doc.add_table(rows=1, cols=2)
+    # Use rows=2 so python-docx creates valid row XML natively
+    tbl = doc.add_table(rows=2, cols=2)
     tbl.autofit = False
 
-    # ── Fixed table layout — prevents Word redistributing column widths ───
     tblPr = tbl._tbl.tblPr
 
+    # Fixed layout — Word must honour our explicit widths
     tblLayout = _OE("w:tblLayout")
     tblLayout.set(_qn("w:type"), "fixed")
     tblPr.append(tblLayout)
 
-    # ── Lock total table width ────────────────────────────────────────────
+    # Total table width
     tblW = tblPr.find(_qn("w:tblW"))
     if tblW is None:
         tblW = _OE("w:tblW"); tblPr.append(tblW)
     tblW.set(_qn("w:w"),    str(total_dxa))
     tblW.set(_qn("w:type"), "dxa")
 
-    # ── Remove all borders ────────────────────────────────────────────────
+    # Remove all borders
     tblBorders = _OE("w:tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         b = _OE(f"w:{side}")
@@ -347,12 +348,18 @@ def _make_two_col_table(doc, total_dxa=8510, date_dxa=2200):
         tblBorders.append(b)
     tblPr.append(tblBorders)
 
-    # ── Define grid columns ───────────────────────────────────────────────
+    # Grid column definitions
     tblGrid = _OE("w:tblGrid")
     for dxa in (content_dxa, date_dxa):
         gc = _OE("w:gridCol"); gc.set(_qn("w:w"), str(dxa))
         tblGrid.append(gc)
-    tbl._tbl.insert(1, tblGrid)   # insert after tblPr
+    # Insert tblGrid right after tblPr (index 0)
+    tbl._tbl.insert(list(tbl._tbl).index(tblPr) + 1, tblGrid)
+
+    # Lock all cell widths explicitly
+    for row in tbl.rows:
+        for cell, dxa in zip(row.cells, (content_dxa, date_dxa)):
+            _lock_cell(cell, dxa)
 
     return tbl, content_dxa, date_dxa
 
@@ -384,39 +391,19 @@ def _no_wrap_cell(cell):
 def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
     """
     2-row fixed-layout table:
-      Row 1: COMPANY (bold UPPER, left)    | Date (italic, LEFT, no-wrap)
-      Row 2: Job title (bold, left)        | [empty, no-wrap]
-
-    Fixed layout + explicit DXA widths ensure dates ALWAYS start at the
-    same column and NEVER wrap — regardless of content length.
+      Row 1: COMPANY (bold UPPER)  |  Date (italic, LEFT-aligned, no-wrap)
+      Row 2: Job title (bold)      |  [empty, no-wrap]
     """
-    TOTAL = 8510    # A4 body: 11910 - 1700*2 margins
-    DATE  = 2200    # 1.53" — fits "Sep 2020 - Present" at 10.5pt
+    TOTAL = 8510
+    DATE  = 2200
     CONT  = TOTAL - DATE
 
     tbl, _, _ = _make_two_col_table(doc, total_dxa=TOTAL, date_dxa=DATE)
-
-    # The table was created with 1 row — add a second
-    from docx.oxml import OxmlElement as _OE
-    from docx.oxml.ns import qn as _qn
-    tr2 = _OE("w:tr"); tbl._tbl.append(tr2)
-    for dxa in (CONT, DATE):
-        tc = _OE("w:tc")
-        tcPr = _OE("w:tcPr"); tcW = _OE("w:tcW")
-        tcW.set(_qn("w:w"), str(dxa)); tcW.set(_qn("w:type"), "dxa")
-        tcPr.append(tcW); tc.append(tcPr)
-        p = _OE("w:p"); tc.append(p); tr2.append(tc)
-
     r0c0, r0c1 = tbl.rows[0].cells
     r1c0, r1c1 = tbl.rows[1].cells
 
-    # Lock every cell width
-    for cell, dxa in [(r0c0, CONT), (r0c1, DATE), (r1c0, CONT), (r1c1, DATE)]:
-        _lock_cell(cell, dxa)
-
-    # No-wrap on date cells (must be set BEFORE adding text)
-    _no_wrap_cell(r0c1)
-    _no_wrap_cell(r1c1)
+    # noWrap BEFORE adding text
+    _no_wrap_cell(r0c1); _no_wrap_cell(r1c1)
 
     # Row 1: Company | Date
     _base_run(r0c0.paragraphs[0], company_part.strip().upper(), bold=True)
@@ -440,37 +427,21 @@ def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
 def add_education_row(doc, degree_part: str, date_part: str, institution: str = ""):
     """
     2-row fixed-layout table (same widths as experience so dates align):
-      Row 1: DEGREE (bold ALL CAPS, left)          | Date (italic, LEFT, no-wrap)
-      Row 2: Institution (unbold, sentence case)    | [empty, no-wrap]
-
-    Degree is ALL CAPS bold.
-    Institution is sentence case, not bold, starting on the line below.
-    Date column is identical to experience — all dates line up across the doc.
+      Row 1: DEGREE (ALL CAPS bold)            |  Date (italic, LEFT, no-wrap)
+      Row 2: Institution (sentence case unbold) |  [empty, no-wrap]
     """
     TOTAL = 8510
     DATE  = 2200
     CONT  = TOTAL - DATE
 
-    rows_needed = 2 if institution else 1
     tbl, _, _ = _make_two_col_table(doc, total_dxa=TOTAL, date_dxa=DATE)
-
-    from docx.oxml import OxmlElement as _OE
-    from docx.oxml.ns import qn as _qn
-
-    if rows_needed == 2:
-        tr2 = _OE("w:tr"); tbl._tbl.append(tr2)
-        for dxa in (CONT, DATE):
-            tc = _OE("w:tc")
-            tcPr = _OE("w:tcPr"); tcW = _OE("w:tcW")
-            tcW.set(_qn("w:w"), str(dxa)); tcW.set(_qn("w:type"), "dxa")
-            tcPr.append(tcW); tc.append(tcPr)
-            p = _OE("w:p"); tc.append(p); tr2.append(tc)
-
     r0c0, r0c1 = tbl.rows[0].cells
-    _lock_cell(r0c0, CONT);  _lock_cell(r0c1, DATE)
-    _no_wrap_cell(r0c1)   # set BEFORE adding text
+    r1c0, r1c1 = tbl.rows[1].cells
 
-    # Row 1: Degree ALL CAPS bold | Date italic LEFT no-wrap
+    # noWrap BEFORE adding text
+    _no_wrap_cell(r0c1); _no_wrap_cell(r1c1)
+
+    # Row 1: Degree ALL CAPS | Date italic LEFT
     _base_run(r0c0.paragraphs[0], degree_part.strip().upper(), bold=True)
     r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
     _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
@@ -480,17 +451,19 @@ def add_education_row(doc, degree_part: str, date_part: str, institution: str = 
     r0c1.paragraphs[0].paragraph_format.space_before = Pt(4)
     r0c1.paragraphs[0].paragraph_format.space_after  = Pt(2)
 
+    # Row 2: Institution | empty  (only written if institution provided)
     if institution:
-        r1c0, r1c1 = tbl.rows[1].cells
-        _lock_cell(r1c0, CONT); _lock_cell(r1c1, DATE)
-        _no_wrap_cell(r1c1)   # set BEFORE adding text
-
-        # Row 2: Institution unbold sentence case | empty
         _base_run(r1c0.paragraphs[0], sentence_case(institution.strip()), bold=False)
         r1c0.paragraphs[0].paragraph_format.space_before = Pt(0)
         r1c0.paragraphs[0].paragraph_format.space_after  = Pt(SP)
         r1c1.paragraphs[0].paragraph_format.space_before = Pt(0)
         r1c1.paragraphs[0].paragraph_format.space_after  = Pt(SP)
+    else:
+        # No institution — collapse row 2 to zero height
+        r1c0.paragraphs[0].paragraph_format.space_before = Pt(0)
+        r1c0.paragraphs[0].paragraph_format.space_after  = Pt(0)
+        r1c1.paragraphs[0].paragraph_format.space_before = Pt(0)
+        r1c1.paragraphs[0].paragraph_format.space_after  = Pt(0)
 
     return tbl
 
@@ -791,27 +764,34 @@ if st.session_state.original_ai_output:
 
         replace_all_placeholders(doc, contact_number, document_name, document_name)
 
-        # ── CLEAR EMPTY TEMPLATE BODY PARAGRAPHS ─────────────────────────────
-        # The template body contains placeholder empty paragraphs that push
-        # content to mid-page. Remove every trailing empty paragraph from the
-        # body so resume content starts immediately after the template header.
+        # ── CLEAR EMPTY TEMPLATE BODY PARAGRAPHS (preserve drawings) ─────────
+        # The template body has empty placeholder paragraphs that push content
+        # down. Remove them BUT keep any paragraph that contains a drawing
+        # (the watermark/logo image embedded in the body).
         from docx.oxml.ns import qn as _qn
         body = doc.element.body
-        # Remove empty paragraphs at the END of the body (before sectPr)
-        # We keep going until we hit a non-empty paragraph or a table.
+        W_DRAWING = _qn("w:drawing")
+        W_PICT    = _qn("w:pict")
+
         while True:
-            # Last child before sectPr
-            children = [c for c in body if c.tag != _qn('w:sectPr')]
+            children = [c for c in body if c.tag != _qn("w:sectPr")]
             if not children:
                 break
             last = children[-1]
-            # If it's a paragraph with no text content, remove it
-            if last.tag == _qn('w:p'):
-                text = "".join(t.text or "" for t in last.iter(_qn('w:t')))
-                if not text.strip():
+            if last.tag == _qn("w:p"):
+                # Keep if it contains a drawing/image (watermark)
+                has_drawing = (last.find(f".//{W_DRAWING}") is not None or
+                               last.find(f".//{W_PICT}")    is not None)
+                text = "".join(t.text or "" for t in last.iter(_qn("w:t")))
+                if not text.strip() and not has_drawing:
                     body.remove(last)
                     continue
             break
+
+        # ── ONE LINE SPACE at top (below the header line) ─────────────────────
+        top_spacer = doc.add_paragraph()
+        top_spacer.paragraph_format.space_before = Pt(0)
+        top_spacer.paragraph_format.space_after  = Pt(12)   # 1 line ≈ 12pt
 
         # ── SECTION LOOP ──────────────────────────────────────────────────────
         for h in header_order:
@@ -947,20 +927,20 @@ if st.session_state.original_ai_output:
             # Trailing spacer after every section (uniform)
             add_spacer(doc, before=0, after=SP)
 
-        # ── END-OF-DOCUMENT spacer ────────────────────────────────────────────
-        add_spacer(doc, before=SP, after=SP)
+        # ── ONE LINE SPACE at bottom (above the footer line) ──────────────────
+        bottom_spacer = doc.add_paragraph()
+        bottom_spacer.paragraph_format.space_before = Pt(12)  # 1 line ≈ 12pt
+        bottom_spacer.paragraph_format.space_after  = Pt(0)
 
         # ── PAGE BREAK SPACING ────────────────────────────────────────────────
-        # For every hard page-break run: add 2 lines (24 pt) BEFORE the break
-        # paragraph (= end of the outgoing page) and 2 lines AFTER it
-        # (= start of the incoming page).  First page is unaffected because
-        # title_p has space_before = 0.
+        # For every hard page-break run: ensure 1 line before (end of page)
+        # and 1 line after (start of next page).
         for p in doc.paragraphs:
             for run in p.runs:
                 for br in run._element.findall(qn("w:br")):
                     if br.get(qn("w:type")) == "page":
-                        p.paragraph_format.space_before = Pt(TWO_LINE_PT)
-                        p.paragraph_format.space_after  = Pt(TWO_LINE_PT)
+                        p.paragraph_format.space_before = Pt(12)
+                        p.paragraph_format.space_after  = Pt(12)
 
         buf = io.BytesIO()
         doc.save(buf)
