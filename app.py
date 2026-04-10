@@ -962,11 +962,9 @@ RESUME:
             # These body paragraphs are added inside the section loop below, so
             # we track them and set spacing after the loop.
 
-            ONE_LINE_DXA = 240   # 12pt in twentieths-of-a-point (half-points)
+            ONE_LINE_DXA = 240   # kept for reference
 
             # ── SECTION LOOP ──────────────────────────────────────────────────
-            first_body_para = None   # will be set on very first paragraph added
-
             for h in header_order:
                 if h not in current_sections:
                     continue
@@ -983,8 +981,6 @@ RESUME:
                 hp.paragraph_format.keep_with_next = True
                 set_keep_with_next(hp)
                 _base_run(hp, h, bold=True, size_pt=11)
-                if first_body_para is None:
-                    first_body_para = hp
 
                 lines = current_sections[h]
                 i = 0
@@ -1081,34 +1077,49 @@ RESUME:
 
                 add_spacer(doc, before=0, after=SP)
 
-            # ── TOP SPACING: 1 line gap below header line on every page ──────
-            # space_before on the FIRST body paragraph, set via XML (half-points).
-            # ONE_LINE_HP = 240 half-points = 12pt. Do NOT touch header/footer
-            # paragraphs — their drawings use absolute positioning and spacing
-            # changes corrupt the footer address layout.
+            # ── SPACING ON EVERY PAGE (top & bottom) ─────────────────────────
+            # Body paragraph spacing (space_before / space_after) only affects
+            # the first and last page. Pages 2, 3, 4... are SOFT breaks decided
+            # by Word at render time — there is no paragraph to target.
+            #
+            # The ONLY reliable way to add consistent top/bottom space on EVERY
+            # page is to increase the page body margins in sectPr.
+            # Current template: top=2160 DXA, bottom=1720 DXA.
+            # Adding 240 DXA (12pt = 1 line) to each creates a visible gap
+            # between the header/footer lines and the content on every page.
+            # The header/footer drawings are absolutely positioned so their
+            # visual position does NOT change — only the body text area shrinks
+            # by 12pt at top and bottom, creating the required gap.
+            #
+            # We do NOT touch header or footer paragraph spacing — those drawings
+            # use absolute page-relative positioning and any para spacing change
+            # corrupts the footer address layout.
+
             from docx.oxml.ns import qn as _qn2
             from docx.oxml import OxmlElement as _OE_sp
-            ONE_LINE_HP = 240   # 12pt × 20 half-points/pt = 240
 
-            if first_body_para is not None:
-                pPr = first_body_para._element.get_or_add_pPr()
-                spc = pPr.find(_qn2("w:spacing"))
-                if spc is None:
-                    spc = _OE_sp("w:spacing"); pPr.append(spc)
-                existing_after = spc.get(_qn2("w:after"), str(SP * 20))
-                spc.set(_qn2("w:before"), str(ONE_LINE_HP))
-                spc.set(_qn2("w:after"),  existing_after)
+            EXTRA_DXA = 240   # 240 DXA = 12pt = 1 line of space
 
-            # ── BOTTOM SPACING: 1 line gap above footer line on every page ────
-            # A final empty paragraph with space_after=12pt. Footer is untouched.
-            last_para = doc.add_paragraph()
-            pPr2 = last_para._element.get_or_add_pPr()
-            spc2 = _OE_sp("w:spacing")
-            spc2.set(_qn2("w:before"), "0")
-            spc2.set(_qn2("w:after"),  str(ONE_LINE_HP))
-            pPr2.append(spc2)
+            for section in doc.sections:
+                # Access sectPr via the section's XML element
+                sectPr = section._sectPr
+                pgMar  = sectPr.find(_qn2("w:pgMar"))
+                if pgMar is not None:
+                    # Read current margins (template values)
+                    try:
+                        cur_top = int(pgMar.get(_qn2("w:top"),    "2160"))
+                        cur_bot = int(pgMar.get(_qn2("w:bottom"), "1720"))
+                    except (ValueError, TypeError):
+                        cur_top, cur_bot = 2160, 1720
 
-            # Hard page-break spacing
+                    # Only increase if not already increased (idempotent)
+                    new_top = cur_top + EXTRA_DXA
+                    new_bot = cur_bot + EXTRA_DXA
+
+                    pgMar.set(_qn2("w:top"),    str(new_top))
+                    pgMar.set(_qn2("w:bottom"), str(new_bot))
+
+            # Hard page-break spacing (for any explicit page breaks in content)
             for p in doc.paragraphs:
                 for run in p.runs:
                     for br in run._element.findall(qn("w:br")):
