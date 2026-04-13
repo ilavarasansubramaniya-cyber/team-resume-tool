@@ -913,7 +913,7 @@ RESUME:
                         .replace("**", "").replace("__", "").strip()
                     )
                     current_sections = get_sections_dict(checked_text)
-                    st.success("✅ QA passed — building resume...")
+                    st.success("✅ QA passed — resume builded...")
                 except Exception as e:
                     st.warning(f"QA skipped: {e}")
                     checked_text = final_text
