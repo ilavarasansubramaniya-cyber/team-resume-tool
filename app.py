@@ -13,7 +13,7 @@ from PIL import Image
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. UI Config
 # ─────────────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="ResumePro Elite", layout="wide", page_icon="💎")
+st.set_page_config(page_title="Resume Formatter", layout="wide")
 
 st.markdown("""
     <style>
@@ -79,12 +79,12 @@ if "original_ai_output" not in st.session_state:
 # ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("# 💎 Elite Control")
-    with st.expander("🏢 BRANDING", expanded=True):
+    with st.expander("BRANDING", expanded=True):
         company_choice = st.selectbox("Select Template", ["W3G", "Synectics", "ProTouch"])
         contact_number = st.text_input("Contact Number", value="123-456-7890")
         document_name  = st.text_input("Name", placeholder="Enter candidate name")
 
-    with st.expander("🧠 AI ENGINE SETTINGS", expanded=True):
+    with st.expander("AI ENGINE SETTINGS", expanded=True):
         include_summary  = st.checkbox("Develop Executive Summary", value=True)
         custom_points    = st.text_area("Custom Points", placeholder="Leadership, ROI...")
         make_confidential = st.checkbox("Anonymize Employers [CONFIDENTIAL]", value=False)
@@ -567,15 +567,15 @@ def set_keep_together(paragraph):
 # ─────────────────────────────────────────────────────────────────────────────
 st.title("Professional Resume Artisan")
 uploaded_file = st.file_uploader("Drop Resume", type=["pdf", "docx", "png", "jpg", "jpeg"])
-generate_btn  = st.button("✨ START AI TRANSFORMATION")
+generate_btn  = st.button("START AI TRANSFORMATION")
 
 if uploaded_file and generate_btn:
-    with st.status("🛠️ Re-architecting Content...", expanded=True):
+    with st.status("Re-architecting Content...", expanded=True):
         try:
             model = genai.GenerativeModel(MODEL_NAME)
 
             # ── Extract raw content from file ────────────────────────────────
-            st.write("📄 Reading resume...")
+            st.write("Reading resume...")
             if uploaded_file.type == "application/pdf":
                 raw = "".join([p.extract_text() for p in PyPDF2.PdfReader(uploaded_file).pages])
             elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
@@ -584,7 +584,7 @@ if uploaded_file and generate_btn:
                 raw = Image.open(uploaded_file)
 
             # ── STAGE 1: Deep understanding ──────────────────────────────────
-            st.write("🧠 Reading and understanding resume deeply...")
+            st.write("Reading and understanding resume deeply...")
 
             understanding_prompt = """
 You are an expert resume analyst. Before doing anything else, READ THE ENTIRE
@@ -721,7 +721,7 @@ fully structured output:
             understood_resume = stage1_response.text.replace("**", "").strip()
 
             # ── STAGE 2: Polish and enforce all formatting rules ──────────────
-            st.write("✨ Polishing and finalising...")
+            st.write("Polishing and finalising...")
 
             sum_p = (
                 f"Write or improve the SUMMARY: section using these focus points: "
@@ -799,7 +799,7 @@ RESUME TO FINALISE:
                 .replace("__", "")
                 .strip()
             )
-            st.write("✅ Done!")
+            st.write("Done!")
 
         except Exception as e:
             st.error(f"System Error: {e}")
@@ -840,12 +840,12 @@ if st.session_state.original_ai_output:
     with c_edit:
         st.markdown(
             '<div class="save-hint">'
-            '💾 Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to apply your edits'
+            'Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to apply your edits'
             ' before downloading'
             '</div>',
             unsafe_allow_html=True,
         )
-        st.markdown("#### 🖋️ Live Editor")
+        st.markdown("#### Live Editor")
         final_text = st.text_area(
             "Content Control:",
             value=reordered_text,
@@ -858,10 +858,10 @@ if st.session_state.original_ai_output:
     current_sections = get_sections_dict(final_text)
 
     with c_preview:
-        st.subheader("✅ Finalize & Download")
+        st.subheader("Finalize & Download")
 
-        if st.button("📋 CHECK & DOWNLOAD", use_container_width=True):
-            with st.spinner("🔍 AI checking formatting before export..."):
+        if st.button("CHECK & DOWNLOAD", use_container_width=True):
+            with st.spinner("AI checking formatting before export..."):
                 try:
                     model_qa = genai.GenerativeModel(MODEL_NAME)
                     qa_prompt = f"""
@@ -913,7 +913,7 @@ RESUME:
                         .replace("**", "").replace("__", "").strip()
                     )
                     current_sections = get_sections_dict(checked_text)
-                    st.success("✅ QA passed — resume builded...")
+                    st.success("QA passed — resume builded...")
                 except Exception as e:
                     st.warning(f"QA skipped: {e}")
                     checked_text = final_text
@@ -1132,7 +1132,7 @@ RESUME:
             file_name = (f"{document_name.strip().upper()}.docx"
                          if document_name.strip() else "RESUME.docx")
             st.download_button(
-                label=f"📥 DOWNLOAD {company_choice} DOCX",
+                label=f"DOWNLOAD {company_choice} DOCX",
                 data=buf.getvalue(),
                 file_name=file_name,
             )
