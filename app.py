@@ -10,30 +10,26 @@ import google.generativeai as genai
 import os
 from PIL import Image
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. UI Config
-# ─────────────────────────────────────────────────────────────────────────────
+
 st.set_page_config(page_title="Resume Formatter", layout="wide")
 
+# custom CSS - Inter font + button styles + save hint banner
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .main { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
 
-    /* Primary action button */
     .stButton>button {
         width: 100%; border-radius: 12px; height: 3.5em;
         background: #007bff; color: white; font-weight: bold; border: none;
     }
 
-    /* Download button */
     .stDownloadButton>button {
         width: 100%; border-radius: 12px; height: 3.5em;
         background: #28a745; color: white; border: none;
     }
 
-    /* ── SAVE HINT BANNER ── */
     .save-hint {
         background: #fff3cd;
         border: 2px solid #ffc107;
@@ -58,9 +54,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. AI Engine Config
-# ─────────────────────────────────────────────────────────────────────────────
+
 MODEL_NAME = "gemini-2.5-flash-lite"
 
 try:
@@ -74,9 +68,8 @@ except Exception as e:
 if "original_ai_output" not in st.session_state:
     st.session_state.original_ai_output = ""
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 3. Sidebar
-# ─────────────────────────────────────────────────────────────────────────────
+
+# sidebar controls
 with st.sidebar:
     st.markdown("# 💎 Elite Control")
     with st.expander("BRANDING", expanded=True):
@@ -85,19 +78,15 @@ with st.sidebar:
         document_name  = st.text_input("Name", placeholder="Enter candidate name")
 
     with st.expander("AI ENGINE SETTINGS", expanded=True):
-        include_summary  = st.checkbox("Develop Executive Summary", value=True)
-        custom_points    = st.text_area("Custom Points", placeholder="Leadership, ROI...")
+        include_summary   = st.checkbox("Develop Executive Summary", value=True)
+        custom_points     = st.text_area("Custom Points", placeholder="Leadership, ROI...")
         make_confidential = st.checkbox("Anonymize Employers [CONFIDENTIAL]", value=False)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 4. Spacing constants  (all uniform — one value rules them all)
-# ─────────────────────────────────────────────────────────────────────────────
-SP = 6          # Pt — half-line spacing used uniformly everywhere
+
+# SP is used everywhere for uniform half-line gaps
+SP = 6
 TWO_LINE_PT = 24
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 5. Helper / Logic Functions
-# ─────────────────────────────────────────────────────────────────────────────
 
 def sentence_case(text: str) -> str:
     """
@@ -115,8 +104,8 @@ def sentence_case(text: str) -> str:
 def get_sections_dict(text: str) -> dict:
     """
     Parse AI text into {HEADER: [lines]}.
-    Main headers  : ALL CAPS ending with colon  →  CORE SKILLS:
-    Sub-headers   : lines starting with ##       →  ##Technical skills:
+    Main headers  : ALL CAPS ending with colon  ->  CORE SKILLS:
+    Sub-headers   : lines starting with ##       ->  ##Technical skills:
     Sub-headers are stored as-is so the renderer can detect and style them.
     Drops known skills-section noise artefacts.
     """
@@ -125,12 +114,12 @@ def get_sections_dict(text: str) -> dict:
         clean = line.strip()
         if not clean:
             continue
-        # Main section header — ALL CAPS + ends with colon
+        # main section headers are ALL CAPS + end with colon
         if clean.isupper() and clean.endswith(":"):
             current_header = clean
             sections[current_header] = []
         elif current_header:
-            # Drop table/software artefacts
+            # drop table/software artefacts inside skill sections
             if "SKILL" in current_header.upper() and any(
                 x in clean.lower() for x in ["software", "table", "the following"]
             ):
@@ -169,7 +158,7 @@ def _scan_element_for_placeholders(element, targets: dict):
     """
     from docx.oxml.ns import qn as _qn
     W_T = _qn("w:t")
-    # Collect all <w:t> elements anywhere in this element tree
+    # replace tokens in every <w:t> node we can find
     for wt in element.iter(W_T):
         text = wt.text or ""
         if not any(tok in text for tok in targets):
@@ -179,8 +168,8 @@ def _scan_element_for_placeholders(element, targets: dict):
             new_text = new_text.replace(token, val)
         wt.text = new_text
 
-    # Also handle tokens split across sibling <w:t> nodes within the same <w:r>
-    # by scanning all <w:p> ancestors and merging runs there too
+    # also handle tokens split across sibling <w:t> nodes in the same <w:r>
+    # by scanning all <w:p> ancestors and merging runs
     W_P = _qn("w:p")
     W_R = _qn("w:r")
     for wp in element.iter(W_P):
@@ -193,7 +182,7 @@ def _scan_element_for_placeholders(element, targets: dict):
             new_full = new_full.replace(token, val)
         if new_full == full:
             continue
-        # Write back into first w:t of the paragraph, blank the rest
+        # write back into first w:t, blank the rest
         first_wt = None
         for r in runs:
             wt = r.find(W_T)
@@ -208,7 +197,7 @@ def _scan_element_for_placeholders(element, targets: dict):
 
 def replace_all_placeholders(doc, contact: str, title: str, name: str):
     """
-    Replace [CONTACT_NUMBER], [DOCUMENT_TITLE] and [NAME] everywhere —
+    Replace [CONTACT_NUMBER], [DOCUMENT_TITLE] and [NAME] everywhere -
     including inside floating text boxes in headers/footers which the
     standard python-docx .paragraphs iterator completely misses.
     """
@@ -218,16 +207,16 @@ def replace_all_placeholders(doc, contact: str, title: str, name: str):
         "[NAME]":           name,
     }
 
-    # Scan every section header and footer element tree in full (catches textboxes)
+    # scan every section header/footer element tree in full (catches textboxes)
     for section in doc.sections:
         for part in [section.header, section.footer]:
             _scan_element_for_placeholders(part._element, targets)
 
-    # Scan the main document body element tree in full
+    # also scan the main document body
     _scan_element_for_placeholders(doc.element.body, targets)
 
 
-# ── Section-type detectors ────────────────────────────────────────────────────
+# section-type helpers
 def _is_list_section(h: str) -> bool:
     return any(kw in h.upper() for kw in
                ["SKILL", "CERTIF", "TOOL", "TECHNOLOG", "COMPETENC"])
@@ -242,7 +231,7 @@ def _is_summ_section(h: str) -> bool:
     return "SUMMARY" in h.upper()
 
 
-# ── Content writers ───────────────────────────────────────────────────────────
+# content-writing helpers
 def _base_run(p, text: str, bold=False, italic=False, size_pt=10.5):
     run = p.add_run(text)
     run.bold      = bold
@@ -273,12 +262,11 @@ def add_spacer(doc, before=0, after=SP):
 
 
 def split_by_pipe(line: str):
-    """'A | B | C' → ['A', 'B', 'C']"""
+    """'A | B | C' -> ['A', 'B', 'C']"""
     return [seg.strip() for seg in line.split("|") if seg.strip()]
 
 
-# Date keywords used to distinguish "Company | Date" lines from
-# job titles that happen to contain a pipe character.
+# used to tell date-range lines apart from job-title lines that happen to have a pipe
 _DATE_KEYWORDS = (
     "present", "current", "now",
     "jan", "feb", "mar", "apr", "may", "jun",
@@ -292,17 +280,15 @@ _DATE_DIGITS_RE = __import__("re").compile(r"\b(19|20)\d{2}\b")
 def is_company_date_line(line: str) -> bool:
     """
     Return True only when the part AFTER the last '|' looks like a date range.
-    e.g. 'Acme Corp | Jan 2020 - Present'  → True
-         'Manager | Team Lead'              → False  (job title with pipe)
-         'CPA | Auditing & Accounting'      → False  (education degree with pipe)
+    e.g. 'Acme Corp | Jan 2020 - Present'  -> True
+         'Manager | Team Lead'              -> False  (job title with pipe)
+         'CPA | Auditing & Accounting'      -> False  (education degree with pipe)
     """
     if "|" not in line:
         return False
     after_last_pipe = line.split("|")[-1].strip().lower()
-    # Contains a 4-digit year (1900-2099) → it's a date
     if _DATE_DIGITS_RE.search(after_last_pipe):
         return True
-    # Contains a month name or 'present' → it's a date
     if any(kw in after_last_pipe for kw in _DATE_KEYWORDS):
         return True
     return False
@@ -326,19 +312,18 @@ def _make_two_col_table(doc, total_dxa=8510, date_dxa=2520):
 
     tblPr = tbl._tbl.tblPr
 
-    # Fixed layout — Word must honour explicit widths
+    # force fixed layout so Word honours our explicit widths
     tblLayout = _OE("w:tblLayout")
     tblLayout.set(_qn("w:type"), "fixed")
     tblPr.append(tblLayout)
 
-    # Total table width
     tblW = tblPr.find(_qn("w:tblW"))
     if tblW is None:
         tblW = _OE("w:tblW"); tblPr.append(tblW)
     tblW.set(_qn("w:w"),    str(total_dxa))
     tblW.set(_qn("w:type"), "dxa")
 
-    # Zero out default cell margins so no hidden padding shrinks the date cell
+    # zero out default cell margins
     tblCellMar = _OE("w:tblCellMar")
     for side in ("top", "left", "bottom", "right"):
         m = _OE(f"w:{side}")
@@ -347,7 +332,7 @@ def _make_two_col_table(doc, total_dxa=8510, date_dxa=2520):
         tblCellMar.append(m)
     tblPr.append(tblCellMar)
 
-    # Remove all borders
+    # remove all borders
     tblBorders = _OE("w:tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         b = _OE(f"w:{side}")
@@ -358,14 +343,13 @@ def _make_two_col_table(doc, total_dxa=8510, date_dxa=2520):
         tblBorders.append(b)
     tblPr.append(tblBorders)
 
-    # Grid column definitions
+    # grid column definitions
     tblGrid = _OE("w:tblGrid")
     for dxa in (content_dxa, date_dxa):
         gc = _OE("w:gridCol"); gc.set(_qn("w:w"), str(dxa))
         tblGrid.append(gc)
     tbl._tbl.insert(list(tbl._tbl).index(tblPr) + 1, tblGrid)
 
-    # Lock all cell widths explicitly
     for row in tbl.rows:
         for cell, dxa in zip(row.cells, (content_dxa, date_dxa)):
             _lock_cell(cell, dxa)
@@ -402,25 +386,24 @@ def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
     Date is RIGHT-aligned so all dates end at the same right margin.
     """
     TOTAL = 8510
-    DATE  = 2520    # 1.75" — safely fits longest date at 10.5pt with zero margins
+    DATE  = 2520
     CONT  = TOTAL - DATE
 
     tbl, _, _ = _make_two_col_table(doc, total_dxa=TOTAL, date_dxa=DATE)
     r0c0, r0c1 = tbl.rows[0].cells
     r1c0, r1c1 = tbl.rows[1].cells
 
-    # noWrap BEFORE adding text
+    # noWrap must be set before adding text
     _no_wrap_cell(r0c1); _no_wrap_cell(r1c1)
 
-    # Row 1: Company | Date (RIGHT-aligned)
+    # row 1: company | date (right-aligned)
     _base_run(r0c0.paragraphs[0], company_part.strip().upper(), bold=True)
     r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
 
-    # Row 2: Job title | empty
+    # row 2: job title | empty
     _base_run(r1c0.paragraphs[0], sentence_case(job_title), bold=True)
 
-    # Spacing
     for p in (r0c0.paragraphs[0], r0c1.paragraphs[0]):
         p.paragraph_format.space_before = Pt(SP)
         p.paragraph_format.space_after  = Pt(2)
@@ -445,10 +428,9 @@ def add_education_row(doc, degree_part: str, date_part: str, institution: str = 
     r0c0, r0c1 = tbl.rows[0].cells
     r1c0, r1c1 = tbl.rows[1].cells
 
-    # noWrap BEFORE adding text
     _no_wrap_cell(r0c1); _no_wrap_cell(r1c1)
 
-    # Row 1: Degree ALL CAPS | Date italic RIGHT-aligned
+    # row 1: degree | date
     _base_run(r0c0.paragraphs[0], degree_part.strip().upper(), bold=True)
     r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
@@ -475,7 +457,7 @@ def add_education_row(doc, degree_part: str, date_part: str, institution: str = 
 
 def move_watermark_to_header(doc):
     """
-    The template watermark/logo is a floating image anchored in the body —
+    The template watermark/logo is a floating image anchored in the body -
     it only appears on page 1. This function copies the anchor XML into the
     header so it repeats on every page, then removes it from the body.
     The header already exists (it contains the line graphic and textbox).
@@ -492,7 +474,7 @@ def move_watermark_to_header(doc):
 
     body = doc.element.body
 
-    # Find the paragraph in the body that contains the watermark drawing
+    # find the body paragraph containing the watermark drawing
     watermark_para = None
     watermark_rId  = None
     for para in body.iter(W_P):
@@ -509,37 +491,33 @@ def move_watermark_to_header(doc):
     if watermark_para is None or watermark_rId is None:
         return  # nothing to move
 
-    # Copy the watermark paragraph XML into the header
-    section   = doc.sections[0]
-    header    = section.header
-    hdr_elem  = header._element
+    # copy watermark paragraph XML into the header
+    section  = doc.sections[0]
+    header   = section.header
+    hdr_elem = header._element
 
     watermark_copy = copy.deepcopy(watermark_para)
-    # Insert before the last paragraph in the header
     hdr_paras = hdr_elem.findall(W_P)
     if hdr_paras:
         hdr_elem.insert(list(hdr_elem).index(hdr_paras[-1]), watermark_copy)
     else:
         hdr_elem.append(watermark_copy)
 
-    # Add the image relationship to the header's relationship part
-    # so the rId resolves correctly in the header context
+    # add the image relationship to the header part so the rId resolves correctly
     header_part = header.part
     doc_part    = doc.part
-    # Find the image part via the doc relationship
     try:
         img_part = doc_part.related_parts[watermark_rId]
         new_rId  = header_part.relate_to(
             img_part,
             "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
         )
-        # Update the rEmbed in the copy to use the new rId
         for blip in watermark_copy.iter(A_BLIP):
             blip.set(R_EMBED, new_rId)
     except Exception:
         pass  # if relationship copy fails, watermark still shows from body
 
-    # Remove the watermark from the body so it doesn't double-show on page 1
+    # remove original from body so it doesn't double-show on page 1
     body.remove(watermark_para)
 
 
@@ -562,9 +540,7 @@ def set_keep_together(paragraph):
     pPr.append(kl)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. Main Content Area
-# ─────────────────────────────────────────────────────────────────────────────
+# main content area
 st.title("Professional Resume Artisan")
 uploaded_file = st.file_uploader("Drop Resume", type=["pdf", "docx", "png", "jpg", "jpeg"])
 generate_btn  = st.button("START AI TRANSFORMATION")
@@ -574,7 +550,6 @@ if uploaded_file and generate_btn:
         try:
             model = genai.GenerativeModel(MODEL_NAME)
 
-            # ── Extract raw content from file ────────────────────────────────
             st.write("Reading resume...")
             if uploaded_file.type == "application/pdf":
                 raw = "".join([p.extract_text() for p in PyPDF2.PdfReader(uploaded_file).pages])
@@ -583,7 +558,7 @@ if uploaded_file and generate_btn:
             else:
                 raw = Image.open(uploaded_file)
 
-            # ── STAGE 1: Deep understanding ──────────────────────────────────
+            # Stage 1 - deep read and structure extraction
             st.write("Reading and understanding resume deeply...")
 
             understanding_prompt = """
@@ -720,7 +695,7 @@ fully structured output:
             )
             understood_resume = stage1_response.text.replace("**", "").strip()
 
-            # ── STAGE 2: Polish and enforce all formatting rules ──────────────
+            # Stage 2 - polish and enforce all formatting rules
             st.write("Polishing and finalising...")
 
             sum_p = (
@@ -804,9 +779,8 @@ RESUME TO FINALISE:
         except Exception as e:
             st.error(f"System Error: {e}")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 7. Editor & Export
-# ─────────────────────────────────────────────────────────────────────────────
+
+# editor + export section
 if st.session_state.original_ai_output:
     st.markdown("---")
 
@@ -822,7 +796,7 @@ if st.session_state.original_ai_output:
             default=list(current_sections.keys()),
         )
 
-    # ── Rebuild text in selected order so editor always shows reordered version
+    # rebuild text in selected order so editor always shows reordered version
     if header_order:
         reordered_lines = []
         for h in header_order:
@@ -854,7 +828,7 @@ if st.session_state.original_ai_output:
             help="Edit content here, then press Ctrl+Enter to apply changes.",
         )
 
-    # Re-parse from whatever is currently in the editor (may have manual edits)
+    # re-parse from whatever is currently in the editor (may have manual edits)
     current_sections = get_sections_dict(final_text)
 
     with c_preview:
@@ -933,7 +907,7 @@ RESUME:
             replace_all_placeholders(doc, contact_number, document_name, document_name)
             move_watermark_to_header(doc)
 
-            # ── CLEAR EMPTY TEMPLATE BODY PARAGRAPHS (keep drawings) ──────────
+            # clear empty template body paragraphs (keep drawings)
             from docx.oxml.ns import qn as _qn
             body      = doc.element.body
             W_DRAWING = _qn("w:drawing")
@@ -952,19 +926,15 @@ RESUME:
                         continue
                 break
 
-            # ── SPACING: 1 line top & bottom on every page ────────────────────
-            # The template header LINE and footer LINE are absolutely-positioned
-            # drawings — changing paragraph spacing inside header/footer does NOT
-            # move them and CORRUPTS the footer address layout.
-            # Correct approach: add 12pt space_before on the FIRST body paragraph
-            # (gap between header line and content) and 12pt space_after on the
-            # LAST body paragraph (gap between content and footer line).
-            # These body paragraphs are added inside the section loop below, so
-            # we track them and set spacing after the loop.
+            # add 12pt gap between header/footer lines and content on every page.
+            # the template header/footer drawings are absolutely positioned so their
+            # visual position doesn't change — we just shrink the body text area.
+            # we do NOT touch header/footer paragraph spacing as that corrupts the
+            # footer address layout.
 
             ONE_LINE_DXA = 240   # kept for reference
 
-            # ── SECTION LOOP ──────────────────────────────────────────────────
+            # section loop
             for h in header_order:
                 if h not in current_sections:
                     continue
@@ -974,7 +944,6 @@ RESUME:
                 is_edu  = _is_edu_section(h)
                 is_summ = _is_summ_section(h)
 
-                # Section header paragraph
                 hp = doc.add_paragraph()
                 hp.paragraph_format.space_before   = Pt(SP)
                 hp.paragraph_format.space_after    = Pt(SP)
@@ -988,7 +957,7 @@ RESUME:
                 while i < len(lines):
                     line = lines[i]
 
-                    # ── LIST SECTIONS ─────────────────────────────────────────
+                    # list sections (skills, certs, tools, etc.)
                     if is_list:
                         if line.startswith("##"):
                             sub_text = line.lstrip("#").strip()
@@ -1005,7 +974,7 @@ RESUME:
                             add_bullet(doc, sentence_case(line), bold=False)
                         i += 1
 
-                    # ── EXPERIENCE ────────────────────────────────────────────
+                    # experience entries
                     elif is_exp:
                         if is_company_date_line(line):
                             parts       = line.split("|")
@@ -1026,7 +995,7 @@ RESUME:
                             add_bullet(doc, sentence_case(clean_line), bold=False)
                         i += 1
 
-                    # ── EDUCATION ─────────────────────────────────────────────
+                    # education entries
                     elif is_edu:
                         if is_company_date_line(line):
                             parts       = line.split("|")
@@ -1048,7 +1017,7 @@ RESUME:
                             _base_run(p, sentence_case(line), bold=False)
                         i += 1
 
-                    # ── SUMMARY ───────────────────────────────────────────────
+                    # summary section
                     elif is_summ:
                         p = doc.add_paragraph()
                         p.paragraph_format.space_before = Pt(0)
@@ -1056,10 +1025,8 @@ RESUME:
                         _base_run(p, sentence_case(line), bold=False)
                         i += 1
 
-                    # ── EVERYTHING ELSE ───────────────────────────────────────
-                    # e.g. MILITARY, AWARDS, LANGUAGES, etc.
-                    # If line has a pipe+date pattern → render as company-style row
-                    # (item name left, date right-aligned). Otherwise → bullet.
+                    # everything else (military, awards, languages, etc.)
+                    # if line has a pipe+date -> render as company-style row
                     else:
                         if is_company_date_line(line):
                             parts    = line.split("|")
@@ -1077,49 +1044,31 @@ RESUME:
 
                 add_spacer(doc, before=0, after=SP)
 
-            # ── SPACING ON EVERY PAGE (top & bottom) ─────────────────────────
-            # Body paragraph spacing (space_before / space_after) only affects
-            # the first and last page. Pages 2, 3, 4... are SOFT breaks decided
-            # by Word at render time — there is no paragraph to target.
-            #
-            # The ONLY reliable way to add consistent top/bottom space on EVERY
-            # page is to increase the page body margins in sectPr.
-            # Current template: top=2160 DXA, bottom=1720 DXA.
-            # Adding 240 DXA (12pt = 1 line) to each creates a visible gap
-            # between the header/footer lines and the content on every page.
-            # The header/footer drawings are absolutely positioned so their
-            # visual position does NOT change — only the body text area shrinks
-            # by 12pt at top and bottom, creating the required gap.
-            #
-            # We do NOT touch header or footer paragraph spacing — those drawings
-            # use absolute page-relative positioning and any para spacing change
-            # corrupts the footer address layout.
-
+            # bump top/bottom margins by 240 DXA (12pt) on every page so there's
+            # a visible gap between the header/footer lines and body content.
+            # pages 2+ are soft breaks — the only reliable fix is margin adjustment.
             from docx.oxml.ns import qn as _qn2
             from docx.oxml import OxmlElement as _OE_sp
 
-            EXTRA_DXA = 240   # 240 DXA = 12pt = 1 line of space
+            EXTRA_DXA = 240
 
             for section in doc.sections:
-                # Access sectPr via the section's XML element
                 sectPr = section._sectPr
                 pgMar  = sectPr.find(_qn2("w:pgMar"))
                 if pgMar is not None:
-                    # Read current margins (template values)
                     try:
                         cur_top = int(pgMar.get(_qn2("w:top"),    "2160"))
                         cur_bot = int(pgMar.get(_qn2("w:bottom"), "1720"))
                     except (ValueError, TypeError):
                         cur_top, cur_bot = 2160, 1720
 
-                    # Only increase if not already increased (idempotent)
                     new_top = cur_top + EXTRA_DXA
                     new_bot = cur_bot + EXTRA_DXA
 
                     pgMar.set(_qn2("w:top"),    str(new_top))
                     pgMar.set(_qn2("w:bottom"), str(new_bot))
 
-            # Hard page-break spacing (for any explicit page breaks in content)
+            # fix spacing around any explicit page breaks in the content
             for p in doc.paragraphs:
                 for run in p.runs:
                     for br in run._element.findall(qn("w:br")):
