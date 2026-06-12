@@ -6,30 +6,35 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import io
-import google.generativeai as genai
 import os
+import base64
 from PIL import Image
+from groq import Groq
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. UI Config
+# ─────────────────────────────────────────────────────────────────────────────
+st.set_page_config(page_title="ResumePro Elite", layout="wide", page_icon="💎")
 
-st.set_page_config(page_title="Resume Formatter", layout="wide")
-
-# custom CSS - Inter font + button styles + save hint banner
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .main { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
 
+    /* Primary action button */
     .stButton>button {
         width: 100%; border-radius: 12px; height: 3.5em;
         background: #007bff; color: white; font-weight: bold; border: none;
     }
 
+    /* Download button */
     .stDownloadButton>button {
         width: 100%; border-radius: 12px; height: 3.5em;
         background: #28a745; color: white; border: none;
     }
 
+    /* ── SAVE HINT BANNER ── */
     .save-hint {
         background: #fff3cd;
         border: 2px solid #ffc107;
@@ -54,39 +59,97 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. AI Engine Config — Llama 3.2 11B Vision via Groq Cloud (FREE TIER)
+# ─────────────────────────────────────────────────────────────────────────────
+# Sign up at https://console.groq.com to get a FREE API key (no card required).
+# Free tier: 30 req/min, 7,000 req/day — plenty for testing & moderate use.
+# Model: llama-3.2-11b-vision-preview (Llama 3.2 11B Vision Instruct)
 
-MODEL_NAME = "gemini-2.5-flash-lite"
+MODEL_NAME = "llama-3.2-11b-vision-preview"
 
 try:
-    if "GEMINI_API_KEY" in st.secrets:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    if "GROQ_API_KEY" in st.secrets:
+        groq_client = Groq(api_key=st.secrets["GROQ_API_KEY"])
     else:
-        st.error("API Key missing in Streamlit Secrets.")
+        st.error("⚠️ GROQ_API_KEY missing in Streamlit Secrets. "
+                 "Get a free key at https://console.groq.com")
+        groq_client = None
 except Exception as e:
     st.error(f"Setup Error: {e}")
+    groq_client = None
+
+
+def call_llama(prompt_text, image_input=None):
+    """
+    Call Llama 3.2 11B Vision via Groq.
+    - prompt_text : the instruction/prompt string
+    - image_input : optional PIL Image (for PNG/JPG resume input)
+    Returns an object with .text attribute (mirrors Gemini's response shape so
+    the rest of the code keeps working unchanged).
+    """
+    if groq_client is None:
+        raise RuntimeError("Groq client not initialised.")
+
+    # Build the message — vision input if image provided, else text-only
+    if image_input is not None:
+        # Convert PIL Image → base64 PNG data URL
+        buf = io.BytesIO()
+        image_input.save(buf, format="PNG")
+        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        data_url = f"data:image/png;base64,{img_b64}"
+
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text",      "text": prompt_text},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ],
+        }]
+    else:
+        messages = [{"role": "user", "content": prompt_text}]
+
+    response = groq_client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=messages,
+        temperature=0.2,        # low for consistent, deterministic formatting
+        max_tokens=4096,
+        top_p=0.9,
+    )
+
+    output_text = response.choices[0].message.content
+
+    class _Resp:
+        def __init__(self, txt): self.text = txt
+    return _Resp(output_text)
 
 if "original_ai_output" not in st.session_state:
     st.session_state.original_ai_output = ""
 
-
-# sidebar controls
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. Sidebar
+# ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("# 💎 Elite Control")
-    with st.expander("BRANDING", expanded=True):
+    with st.expander("🏢 BRANDING", expanded=True):
         company_choice = st.selectbox("Select Template", ["W3G", "Synectics", "ProTouch"])
         contact_number = st.text_input("Contact Number", value="123-456-7890")
         document_name  = st.text_input("Name", placeholder="Enter candidate name")
 
-    with st.expander("AI ENGINE SETTINGS", expanded=True):
-        include_summary   = st.checkbox("Develop Executive Summary", value=True)
-        custom_points     = st.text_area("Custom Points", placeholder="Leadership, ROI...")
+    with st.expander("🧠 AI ENGINE SETTINGS", expanded=True):
+        include_summary  = st.checkbox("Develop Executive Summary", value=True)
+        custom_points    = st.text_area("Custom Points", placeholder="Leadership, ROI...")
         make_confidential = st.checkbox("Anonymize Employers [CONFIDENTIAL]", value=False)
 
-
-# SP is used everywhere for uniform half-line gaps
-SP = 6
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Spacing constants  (all uniform — one value rules them all)
+# ─────────────────────────────────────────────────────────────────────────────
+SP = 6          # Pt — half-line spacing used uniformly everywhere
 TWO_LINE_PT = 24
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Helper / Logic Functions
+# ─────────────────────────────────────────────────────────────────────────────
 
 def sentence_case(text: str) -> str:
     """
@@ -104,8 +167,8 @@ def sentence_case(text: str) -> str:
 def get_sections_dict(text: str) -> dict:
     """
     Parse AI text into {HEADER: [lines]}.
-    Main headers  : ALL CAPS ending with colon  ->  CORE SKILLS:
-    Sub-headers   : lines starting with ##       ->  ##Technical skills:
+    Main headers  : ALL CAPS ending with colon  →  CORE SKILLS:
+    Sub-headers   : lines starting with ##       →  ##Technical skills:
     Sub-headers are stored as-is so the renderer can detect and style them.
     Drops known skills-section noise artefacts.
     """
@@ -114,12 +177,12 @@ def get_sections_dict(text: str) -> dict:
         clean = line.strip()
         if not clean:
             continue
-        # main section headers are ALL CAPS + end with colon
+        # Main section header — ALL CAPS + ends with colon
         if clean.isupper() and clean.endswith(":"):
             current_header = clean
             sections[current_header] = []
         elif current_header:
-            # drop table/software artefacts inside skill sections
+            # Drop table/software artefacts
             if "SKILL" in current_header.upper() and any(
                 x in clean.lower() for x in ["software", "table", "the following"]
             ):
@@ -158,7 +221,7 @@ def _scan_element_for_placeholders(element, targets: dict):
     """
     from docx.oxml.ns import qn as _qn
     W_T = _qn("w:t")
-    # replace tokens in every <w:t> node we can find
+    # Collect all <w:t> elements anywhere in this element tree
     for wt in element.iter(W_T):
         text = wt.text or ""
         if not any(tok in text for tok in targets):
@@ -168,8 +231,8 @@ def _scan_element_for_placeholders(element, targets: dict):
             new_text = new_text.replace(token, val)
         wt.text = new_text
 
-    # also handle tokens split across sibling <w:t> nodes in the same <w:r>
-    # by scanning all <w:p> ancestors and merging runs
+    # Also handle tokens split across sibling <w:t> nodes within the same <w:r>
+    # by scanning all <w:p> ancestors and merging runs there too
     W_P = _qn("w:p")
     W_R = _qn("w:r")
     for wp in element.iter(W_P):
@@ -182,7 +245,7 @@ def _scan_element_for_placeholders(element, targets: dict):
             new_full = new_full.replace(token, val)
         if new_full == full:
             continue
-        # write back into first w:t, blank the rest
+        # Write back into first w:t of the paragraph, blank the rest
         first_wt = None
         for r in runs:
             wt = r.find(W_T)
@@ -197,7 +260,7 @@ def _scan_element_for_placeholders(element, targets: dict):
 
 def replace_all_placeholders(doc, contact: str, title: str, name: str):
     """
-    Replace [CONTACT_NUMBER], [DOCUMENT_TITLE] and [NAME] everywhere -
+    Replace [CONTACT_NUMBER], [DOCUMENT_TITLE] and [NAME] everywhere —
     including inside floating text boxes in headers/footers which the
     standard python-docx .paragraphs iterator completely misses.
     """
@@ -207,16 +270,16 @@ def replace_all_placeholders(doc, contact: str, title: str, name: str):
         "[NAME]":           name,
     }
 
-    # scan every section header/footer element tree in full (catches textboxes)
+    # Scan every section header and footer element tree in full (catches textboxes)
     for section in doc.sections:
         for part in [section.header, section.footer]:
             _scan_element_for_placeholders(part._element, targets)
 
-    # also scan the main document body
+    # Scan the main document body element tree in full
     _scan_element_for_placeholders(doc.element.body, targets)
 
 
-# section-type helpers
+# ── Section-type detectors ────────────────────────────────────────────────────
 def _is_list_section(h: str) -> bool:
     return any(kw in h.upper() for kw in
                ["SKILL", "CERTIF", "TOOL", "TECHNOLOG", "COMPETENC"])
@@ -231,7 +294,7 @@ def _is_summ_section(h: str) -> bool:
     return "SUMMARY" in h.upper()
 
 
-# content-writing helpers
+# ── Content writers ───────────────────────────────────────────────────────────
 def _base_run(p, text: str, bold=False, italic=False, size_pt=10.5):
     run = p.add_run(text)
     run.bold      = bold
@@ -262,11 +325,12 @@ def add_spacer(doc, before=0, after=SP):
 
 
 def split_by_pipe(line: str):
-    """'A | B | C' -> ['A', 'B', 'C']"""
+    """'A | B | C' → ['A', 'B', 'C']"""
     return [seg.strip() for seg in line.split("|") if seg.strip()]
 
 
-# used to tell date-range lines apart from job-title lines that happen to have a pipe
+# Date keywords used to distinguish "Company | Date" lines from
+# job titles that happen to contain a pipe character.
 _DATE_KEYWORDS = (
     "present", "current", "now",
     "jan", "feb", "mar", "apr", "may", "jun",
@@ -280,15 +344,17 @@ _DATE_DIGITS_RE = __import__("re").compile(r"\b(19|20)\d{2}\b")
 def is_company_date_line(line: str) -> bool:
     """
     Return True only when the part AFTER the last '|' looks like a date range.
-    e.g. 'Acme Corp | Jan 2020 - Present'  -> True
-         'Manager | Team Lead'              -> False  (job title with pipe)
-         'CPA | Auditing & Accounting'      -> False  (education degree with pipe)
+    e.g. 'Acme Corp | Jan 2020 - Present'  → True
+         'Manager | Team Lead'              → False  (job title with pipe)
+         'CPA | Auditing & Accounting'      → False  (education degree with pipe)
     """
     if "|" not in line:
         return False
     after_last_pipe = line.split("|")[-1].strip().lower()
+    # Contains a 4-digit year (1900-2099) → it's a date
     if _DATE_DIGITS_RE.search(after_last_pipe):
         return True
+    # Contains a month name or 'present' → it's a date
     if any(kw in after_last_pipe for kw in _DATE_KEYWORDS):
         return True
     return False
@@ -312,18 +378,19 @@ def _make_two_col_table(doc, total_dxa=8510, date_dxa=2520):
 
     tblPr = tbl._tbl.tblPr
 
-    # force fixed layout so Word honours our explicit widths
+    # Fixed layout — Word must honour explicit widths
     tblLayout = _OE("w:tblLayout")
     tblLayout.set(_qn("w:type"), "fixed")
     tblPr.append(tblLayout)
 
+    # Total table width
     tblW = tblPr.find(_qn("w:tblW"))
     if tblW is None:
         tblW = _OE("w:tblW"); tblPr.append(tblW)
     tblW.set(_qn("w:w"),    str(total_dxa))
     tblW.set(_qn("w:type"), "dxa")
 
-    # zero out default cell margins
+    # Zero out default cell margins so no hidden padding shrinks the date cell
     tblCellMar = _OE("w:tblCellMar")
     for side in ("top", "left", "bottom", "right"):
         m = _OE(f"w:{side}")
@@ -332,7 +399,7 @@ def _make_two_col_table(doc, total_dxa=8510, date_dxa=2520):
         tblCellMar.append(m)
     tblPr.append(tblCellMar)
 
-    # remove all borders
+    # Remove all borders
     tblBorders = _OE("w:tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         b = _OE(f"w:{side}")
@@ -343,13 +410,14 @@ def _make_two_col_table(doc, total_dxa=8510, date_dxa=2520):
         tblBorders.append(b)
     tblPr.append(tblBorders)
 
-    # grid column definitions
+    # Grid column definitions
     tblGrid = _OE("w:tblGrid")
     for dxa in (content_dxa, date_dxa):
         gc = _OE("w:gridCol"); gc.set(_qn("w:w"), str(dxa))
         tblGrid.append(gc)
     tbl._tbl.insert(list(tbl._tbl).index(tblPr) + 1, tblGrid)
 
+    # Lock all cell widths explicitly
     for row in tbl.rows:
         for cell, dxa in zip(row.cells, (content_dxa, date_dxa)):
             _lock_cell(cell, dxa)
@@ -386,24 +454,25 @@ def add_experience_row(doc, company_part: str, date_part: str, job_title: str):
     Date is RIGHT-aligned so all dates end at the same right margin.
     """
     TOTAL = 8510
-    DATE  = 2520
+    DATE  = 2520    # 1.75" — safely fits longest date at 10.5pt with zero margins
     CONT  = TOTAL - DATE
 
     tbl, _, _ = _make_two_col_table(doc, total_dxa=TOTAL, date_dxa=DATE)
     r0c0, r0c1 = tbl.rows[0].cells
     r1c0, r1c1 = tbl.rows[1].cells
 
-    # noWrap must be set before adding text
+    # noWrap BEFORE adding text
     _no_wrap_cell(r0c1); _no_wrap_cell(r1c1)
 
-    # row 1: company | date (right-aligned)
+    # Row 1: Company | Date (RIGHT-aligned)
     _base_run(r0c0.paragraphs[0], company_part.strip().upper(), bold=True)
     r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
 
-    # row 2: job title | empty
+    # Row 2: Job title | empty
     _base_run(r1c0.paragraphs[0], sentence_case(job_title), bold=True)
 
+    # Spacing
     for p in (r0c0.paragraphs[0], r0c1.paragraphs[0]):
         p.paragraph_format.space_before = Pt(SP)
         p.paragraph_format.space_after  = Pt(2)
@@ -428,9 +497,10 @@ def add_education_row(doc, degree_part: str, date_part: str, institution: str = 
     r0c0, r0c1 = tbl.rows[0].cells
     r1c0, r1c1 = tbl.rows[1].cells
 
+    # noWrap BEFORE adding text
     _no_wrap_cell(r0c1); _no_wrap_cell(r1c1)
 
-    # row 1: degree | date
+    # Row 1: Degree ALL CAPS | Date italic RIGHT-aligned
     _base_run(r0c0.paragraphs[0], degree_part.strip().upper(), bold=True)
     r0c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _base_run(r0c1.paragraphs[0], date_part.strip(), italic=True)
@@ -457,7 +527,7 @@ def add_education_row(doc, degree_part: str, date_part: str, institution: str = 
 
 def move_watermark_to_header(doc):
     """
-    The template watermark/logo is a floating image anchored in the body -
+    The template watermark/logo is a floating image anchored in the body —
     it only appears on page 1. This function copies the anchor XML into the
     header so it repeats on every page, then removes it from the body.
     The header already exists (it contains the line graphic and textbox).
@@ -474,7 +544,7 @@ def move_watermark_to_header(doc):
 
     body = doc.element.body
 
-    # find the body paragraph containing the watermark drawing
+    # Find the paragraph in the body that contains the watermark drawing
     watermark_para = None
     watermark_rId  = None
     for para in body.iter(W_P):
@@ -491,33 +561,37 @@ def move_watermark_to_header(doc):
     if watermark_para is None or watermark_rId is None:
         return  # nothing to move
 
-    # copy watermark paragraph XML into the header
-    section  = doc.sections[0]
-    header   = section.header
-    hdr_elem = header._element
+    # Copy the watermark paragraph XML into the header
+    section   = doc.sections[0]
+    header    = section.header
+    hdr_elem  = header._element
 
     watermark_copy = copy.deepcopy(watermark_para)
+    # Insert before the last paragraph in the header
     hdr_paras = hdr_elem.findall(W_P)
     if hdr_paras:
         hdr_elem.insert(list(hdr_elem).index(hdr_paras[-1]), watermark_copy)
     else:
         hdr_elem.append(watermark_copy)
 
-    # add the image relationship to the header part so the rId resolves correctly
+    # Add the image relationship to the header's relationship part
+    # so the rId resolves correctly in the header context
     header_part = header.part
     doc_part    = doc.part
+    # Find the image part via the doc relationship
     try:
         img_part = doc_part.related_parts[watermark_rId]
         new_rId  = header_part.relate_to(
             img_part,
             "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
         )
+        # Update the rEmbed in the copy to use the new rId
         for blip in watermark_copy.iter(A_BLIP):
             blip.set(R_EMBED, new_rId)
     except Exception:
         pass  # if relationship copy fails, watermark still shows from body
 
-    # remove original from body so it doesn't double-show on page 1
+    # Remove the watermark from the body so it doesn't double-show on page 1
     body.remove(watermark_para)
 
 
@@ -540,17 +614,18 @@ def set_keep_together(paragraph):
     pPr.append(kl)
 
 
-# main content area
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Main Content Area
+# ─────────────────────────────────────────────────────────────────────────────
 st.title("Professional Resume Artisan")
 uploaded_file = st.file_uploader("Drop Resume", type=["pdf", "docx", "png", "jpg", "jpeg"])
-generate_btn  = st.button("START AI TRANSFORMATION")
+generate_btn  = st.button("✨ START AI TRANSFORMATION")
 
 if uploaded_file and generate_btn:
-    with st.status("Re-architecting Content...", expanded=True):
+    with st.status("🛠️ Re-architecting Content...", expanded=True):
         try:
-            model = genai.GenerativeModel(MODEL_NAME)
-
-            st.write("Reading resume...")
+            # ── Extract raw content from file ────────────────────────────────
+            st.write("📄 Reading resume...")
             if uploaded_file.type == "application/pdf":
                 raw = "".join([p.extract_text() for p in PyPDF2.PdfReader(uploaded_file).pages])
             elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
@@ -558,8 +633,8 @@ if uploaded_file and generate_btn:
             else:
                 raw = Image.open(uploaded_file)
 
-            # Stage 1 - deep read and structure extraction
-            st.write("Reading and understanding resume deeply...")
+            # ── STAGE 1: Deep understanding ──────────────────────────────────
+            st.write("🧠 Reading and understanding resume deeply...")
 
             understanding_prompt = """
 You are an expert resume analyst. Before doing anything else, READ THE ENTIRE
@@ -689,14 +764,16 @@ Now read the resume completely, understand every section, then produce the
 fully structured output:
 """
 
-            stage1_response = model.generate_content(
-                [understanding_prompt, raw] if not isinstance(raw, str)
-                else [understanding_prompt, f"RESUME TEXT:\n{raw}"]
-            )
+            # Stage 1 call — vision input if raw is PIL image, text otherwise
+            if isinstance(raw, Image.Image):
+                stage1_response = call_llama(understanding_prompt, image_input=raw)
+            else:
+                full_prompt = f"{understanding_prompt}\n\nRESUME TEXT:\n{raw}"
+                stage1_response = call_llama(full_prompt)
             understood_resume = stage1_response.text.replace("**", "").strip()
 
-            # Stage 2 - polish and enforce all formatting rules
-            st.write("Polishing and finalising...")
+            # ── STAGE 2: Polish and enforce all formatting rules ──────────────
+            st.write("✨ Polishing and finalising...")
 
             sum_p = (
                 f"Write or improve the SUMMARY: section using these focus points: "
@@ -767,20 +844,21 @@ RESUME TO FINALISE:
 {understood_resume}
 """
 
-            stage2_response = model.generate_content(reformat_prompt)
+            stage2_response = call_llama(reformat_prompt)
             st.session_state.original_ai_output = (
                 stage2_response.text
                 .replace("**", "")
                 .replace("__", "")
                 .strip()
             )
-            st.write("Done!")
+            st.write("✅ Done!")
 
         except Exception as e:
             st.error(f"System Error: {e}")
 
-
-# editor + export section
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Editor & Export
+# ─────────────────────────────────────────────────────────────────────────────
 if st.session_state.original_ai_output:
     st.markdown("---")
 
@@ -796,7 +874,7 @@ if st.session_state.original_ai_output:
             default=list(current_sections.keys()),
         )
 
-    # rebuild text in selected order so editor always shows reordered version
+    # ── Rebuild text in selected order so editor always shows reordered version
     if header_order:
         reordered_lines = []
         for h in header_order:
@@ -814,12 +892,12 @@ if st.session_state.original_ai_output:
     with c_edit:
         st.markdown(
             '<div class="save-hint">'
-            'Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to apply your edits'
+            '💾 Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to apply your edits'
             ' before downloading'
             '</div>',
             unsafe_allow_html=True,
         )
-        st.markdown("#### Live Editor")
+        st.markdown("#### 🖋️ Live Editor")
         final_text = st.text_area(
             "Content Control:",
             value=reordered_text,
@@ -828,16 +906,15 @@ if st.session_state.original_ai_output:
             help="Edit content here, then press Ctrl+Enter to apply changes.",
         )
 
-    # re-parse from whatever is currently in the editor (may have manual edits)
+    # Re-parse from whatever is currently in the editor (may have manual edits)
     current_sections = get_sections_dict(final_text)
 
     with c_preview:
-        st.subheader("Finalize & Download")
+        st.subheader("✅ Finalize & Download")
 
-        if st.button("CHECK & DOWNLOAD", use_container_width=True):
-            with st.spinner("AI checking formatting before export..."):
+        if st.button("📋 CHECK & DOWNLOAD", use_container_width=True):
+            with st.spinner("🔍 AI checking formatting before export..."):
                 try:
-                    model_qa = genai.GenerativeModel(MODEL_NAME)
                     qa_prompt = f"""
 You are a strict resume formatting QA checker. Check every rule below and
 return a CORRECTED resume text. Fix violations silently — no explanations.
@@ -881,13 +958,13 @@ Return ONLY the corrected resume text. No preamble. No commentary.
 RESUME:
 {final_text}
 """
-                    qa_response = model_qa.generate_content(qa_prompt)
+                    qa_response = call_llama(qa_prompt)
                     checked_text = (
                         qa_response.text
                         .replace("**", "").replace("__", "").strip()
                     )
                     current_sections = get_sections_dict(checked_text)
-                    st.success("QA passed — resume builded...")
+                    st.success("✅ QA passed — building resume...")
                 except Exception as e:
                     st.warning(f"QA skipped: {e}")
                     checked_text = final_text
@@ -907,7 +984,7 @@ RESUME:
             replace_all_placeholders(doc, contact_number, document_name, document_name)
             move_watermark_to_header(doc)
 
-            # clear empty template body paragraphs (keep drawings)
+            # ── CLEAR EMPTY TEMPLATE BODY PARAGRAPHS (keep drawings) ──────────
             from docx.oxml.ns import qn as _qn
             body      = doc.element.body
             W_DRAWING = _qn("w:drawing")
@@ -926,15 +1003,19 @@ RESUME:
                         continue
                 break
 
-            # add 12pt gap between header/footer lines and content on every page.
-            # the template header/footer drawings are absolutely positioned so their
-            # visual position doesn't change — we just shrink the body text area.
-            # we do NOT touch header/footer paragraph spacing as that corrupts the
-            # footer address layout.
+            # ── SPACING: 1 line top & bottom on every page ────────────────────
+            # The template header LINE and footer LINE are absolutely-positioned
+            # drawings — changing paragraph spacing inside header/footer does NOT
+            # move them and CORRUPTS the footer address layout.
+            # Correct approach: add 12pt space_before on the FIRST body paragraph
+            # (gap between header line and content) and 12pt space_after on the
+            # LAST body paragraph (gap between content and footer line).
+            # These body paragraphs are added inside the section loop below, so
+            # we track them and set spacing after the loop.
 
             ONE_LINE_DXA = 240   # kept for reference
 
-            # section loop
+            # ── SECTION LOOP ──────────────────────────────────────────────────
             for h in header_order:
                 if h not in current_sections:
                     continue
@@ -944,6 +1025,7 @@ RESUME:
                 is_edu  = _is_edu_section(h)
                 is_summ = _is_summ_section(h)
 
+                # Section header paragraph
                 hp = doc.add_paragraph()
                 hp.paragraph_format.space_before   = Pt(SP)
                 hp.paragraph_format.space_after    = Pt(SP)
@@ -957,7 +1039,7 @@ RESUME:
                 while i < len(lines):
                     line = lines[i]
 
-                    # list sections (skills, certs, tools, etc.)
+                    # ── LIST SECTIONS ─────────────────────────────────────────
                     if is_list:
                         if line.startswith("##"):
                             sub_text = line.lstrip("#").strip()
@@ -974,7 +1056,7 @@ RESUME:
                             add_bullet(doc, sentence_case(line), bold=False)
                         i += 1
 
-                    # experience entries
+                    # ── EXPERIENCE ────────────────────────────────────────────
                     elif is_exp:
                         if is_company_date_line(line):
                             parts       = line.split("|")
@@ -995,7 +1077,7 @@ RESUME:
                             add_bullet(doc, sentence_case(clean_line), bold=False)
                         i += 1
 
-                    # education entries
+                    # ── EDUCATION ─────────────────────────────────────────────
                     elif is_edu:
                         if is_company_date_line(line):
                             parts       = line.split("|")
@@ -1017,7 +1099,7 @@ RESUME:
                             _base_run(p, sentence_case(line), bold=False)
                         i += 1
 
-                    # summary section
+                    # ── SUMMARY ───────────────────────────────────────────────
                     elif is_summ:
                         p = doc.add_paragraph()
                         p.paragraph_format.space_before = Pt(0)
@@ -1025,8 +1107,10 @@ RESUME:
                         _base_run(p, sentence_case(line), bold=False)
                         i += 1
 
-                    # everything else (military, awards, languages, etc.)
-                    # if line has a pipe+date -> render as company-style row
+                    # ── EVERYTHING ELSE ───────────────────────────────────────
+                    # e.g. MILITARY, AWARDS, LANGUAGES, etc.
+                    # If line has a pipe+date pattern → render as company-style row
+                    # (item name left, date right-aligned). Otherwise → bullet.
                     else:
                         if is_company_date_line(line):
                             parts    = line.split("|")
@@ -1044,31 +1128,49 @@ RESUME:
 
                 add_spacer(doc, before=0, after=SP)
 
-            # bump top/bottom margins by 240 DXA (12pt) on every page so there's
-            # a visible gap between the header/footer lines and body content.
-            # pages 2+ are soft breaks — the only reliable fix is margin adjustment.
+            # ── SPACING ON EVERY PAGE (top & bottom) ─────────────────────────
+            # Body paragraph spacing (space_before / space_after) only affects
+            # the first and last page. Pages 2, 3, 4... are SOFT breaks decided
+            # by Word at render time — there is no paragraph to target.
+            #
+            # The ONLY reliable way to add consistent top/bottom space on EVERY
+            # page is to increase the page body margins in sectPr.
+            # Current template: top=2160 DXA, bottom=1720 DXA.
+            # Adding 240 DXA (12pt = 1 line) to each creates a visible gap
+            # between the header/footer lines and the content on every page.
+            # The header/footer drawings are absolutely positioned so their
+            # visual position does NOT change — only the body text area shrinks
+            # by 12pt at top and bottom, creating the required gap.
+            #
+            # We do NOT touch header or footer paragraph spacing — those drawings
+            # use absolute page-relative positioning and any para spacing change
+            # corrupts the footer address layout.
+
             from docx.oxml.ns import qn as _qn2
             from docx.oxml import OxmlElement as _OE_sp
 
-            EXTRA_DXA = 240
+            EXTRA_DXA = 240   # 240 DXA = 12pt = 1 line of space
 
             for section in doc.sections:
+                # Access sectPr via the section's XML element
                 sectPr = section._sectPr
                 pgMar  = sectPr.find(_qn2("w:pgMar"))
                 if pgMar is not None:
+                    # Read current margins (template values)
                     try:
                         cur_top = int(pgMar.get(_qn2("w:top"),    "2160"))
                         cur_bot = int(pgMar.get(_qn2("w:bottom"), "1720"))
                     except (ValueError, TypeError):
                         cur_top, cur_bot = 2160, 1720
 
+                    # Only increase if not already increased (idempotent)
                     new_top = cur_top + EXTRA_DXA
                     new_bot = cur_bot + EXTRA_DXA
 
                     pgMar.set(_qn2("w:top"),    str(new_top))
                     pgMar.set(_qn2("w:bottom"), str(new_bot))
 
-            # fix spacing around any explicit page breaks in the content
+            # Hard page-break spacing (for any explicit page breaks in content)
             for p in doc.paragraphs:
                 for run in p.runs:
                     for br in run._element.findall(qn("w:br")):
@@ -1081,7 +1183,7 @@ RESUME:
             file_name = (f"{document_name.strip().upper()}.docx"
                          if document_name.strip() else "RESUME.docx")
             st.download_button(
-                label=f"DOWNLOAD {company_choice} DOCX",
+                label=f"📥 DOWNLOAD {company_choice} DOCX",
                 data=buf.getvalue(),
                 file_name=file_name,
             )
