@@ -60,13 +60,17 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. AI Engine Config — Llama 3.2 11B Vision via Groq Cloud (FREE TIER)
+# 2. AI Engine Config — Llama 4 Scout via Groq Cloud (FREE TIER)
 # ─────────────────────────────────────────────────────────────────────────────
 # Sign up at https://console.groq.com to get a FREE API key (no card required).
 # Free tier: 30 req/min, 7,000 req/day — plenty for testing & moderate use.
-# Model: llama-3.2-11b-vision-preview (Llama 3.2 11B Vision Instruct)
+#
+# Model: meta-llama/llama-4-scout-17b-16e-instruct (Llama 4 Scout)
+# This is Groq's official replacement for the deprecated Llama 3.2 vision model.
+# Llama 4 Scout has native vision support, 10M token context, and stronger
+# instruction following than Llama 3.2 11B Vision.
 
-MODEL_NAME = "llama-3.2-11b-vision-preview"
+MODEL_NAME = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 try:
     if "GROQ_API_KEY" in st.secrets:
@@ -82,7 +86,7 @@ except Exception as e:
 
 def call_llama(prompt_text, image_input=None):
     """
-    Call Llama 3.2 11B Vision via Groq.
+    Call Llama 4 Scout (17B-16E-Instruct) via Groq Cloud.
     - prompt_text : the instruction/prompt string
     - image_input : optional PIL Image (for PNG/JPG resume input)
     Returns an object with .text attribute (mirrors Gemini's response shape so
