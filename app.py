@@ -658,6 +658,17 @@ Identify every section in the resume — common ones include:
   Tools / Technologies / Software
   Projects / Publications / Awards / Languages / etc.
 
+IMPORTANT — EXISTING SUMMARY / OBJECTIVE / PROFILE:
+If the resume contains a Summary, Objective, Profile, or About Me section
+at the top, preserve its full content exactly as written under a SUMMARY:
+header. This is critical — do NOT skip, summarize, or rewrite it. The
+existing summary must appear in your output so the next stage can decide
+whether to keep or replace it.
+
+If NO summary section exists in the original resume, do NOT create one
+yourself. Leave the SUMMARY: header out entirely — Stage 2 will decide
+whether to generate one.
+
 IMPORTANT — NON-STANDARD SECTIONS WITH DATES:
 Some resumes have sections like MILITARY:, AWARDS:, PUBLICATIONS:,
 LANGUAGES:, VOLUNTEER: that contain entries with dates.
@@ -779,11 +790,61 @@ fully structured output:
             # ── STAGE 2: Polish and enforce all formatting rules ──────────────
             st.write("✨ Polishing and finalising...")
 
-            sum_p = (
-                f"Write or improve the SUMMARY: section using these focus points: "
-                f"{custom_points}. If no focus points given, craft a strong "
-                f"executive summary from the candidate's experience and skills."
-            ) if include_summary else "Do NOT add, change, or remove any SUMMARY: section."
+            # ── SUMMARY HANDLING — explicit, directive logic ─────────────────
+            # Checkbox CHECKED:  AI replaces any existing summary with a freshly
+            #                    developed executive summary (using custom_points
+            #                    if provided, otherwise built from experience).
+            # Checkbox UNCHECKED: AI keeps the resume's existing summary EXACTLY
+            #                    as-is. If no summary exists, no summary is added.
+            if include_summary:
+                focus_text = (custom_points or "").strip()
+                if focus_text:
+                    sum_p = f"""
+═══════════════════════════════════════════════════════
+SUMMARY SECTION — REPLACE / GENERATE A NEW ONE
+═══════════════════════════════════════════════════════
+You MUST produce a fresh executive summary as the FIRST section of the
+output, under the header SUMMARY: — REPLACE any existing summary that was
+in the resume. The new summary must:
+  - Be 3–5 sentences of strong, professional, executive-level prose
+  - Be written in third person (no "I", "my", "me")
+  - Highlight the candidate's strongest experience, leadership, and impact
+  - Incorporate these focus areas naturally: {focus_text}
+  - Use action language and quantifiable achievements where present
+  - NOT use bullet points — flowing prose only
+Even if the resume already has a summary, DISCARD it and write a new one
+based on the candidate's actual experience and the focus areas above.
+"""
+                else:
+                    sum_p = """
+═══════════════════════════════════════════════════════
+SUMMARY SECTION — REPLACE / GENERATE A NEW ONE
+═══════════════════════════════════════════════════════
+You MUST produce a fresh executive summary as the FIRST section of the
+output, under the header SUMMARY: — REPLACE any existing summary that was
+in the resume. The new summary must:
+  - Be 3–5 sentences of strong, professional, executive-level prose
+  - Be written in third person (no "I", "my", "me")
+  - Highlight the candidate's strongest experience, leadership, and measurable impact
+  - Read like it was written by a top executive recruiter
+  - Use action language and quantifiable achievements where present
+  - NOT use bullet points — flowing prose only
+Build it entirely from the candidate's experience, skills, and achievements
+present in the resume. Even if the resume already has a summary, DISCARD
+it and write a fresh, stronger one.
+"""
+            else:
+                sum_p = """
+═══════════════════════════════════════════════════════
+SUMMARY SECTION — PRESERVE EXACTLY AS-IS
+═══════════════════════════════════════════════════════
+If the resume below contains a SUMMARY: section, KEEP IT EXACTLY as
+written — do NOT change, rewrite, shorten, expand, polish, or reword
+any part of it. Reproduce it character-for-character.
+
+If the resume does NOT contain a SUMMARY: section, do NOT create one.
+Skip directly to the next section.
+"""
 
             priv_p = (
                 "CONFIDENTIALITY RULE: Replace every employer/company name with "
@@ -956,6 +1017,11 @@ RULES TO ENFORCE:
 7. No contact info (name, phone, email, address, URL) anywhere.
 
 8. No markdown (no **, __, *, #headers, --- dividers).
+
+9. PRESERVE all section content EXACTLY — do NOT rewrite, summarize,
+   or shorten any summary, bullet, or description text. Your job is to
+   fix STRUCTURE only, not to rewrite content. If a SUMMARY: section
+   exists, keep its prose word-for-word.
 
 Return ONLY the corrected resume text. No preamble. No commentary.
 
